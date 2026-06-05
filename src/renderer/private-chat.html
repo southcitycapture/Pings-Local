@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <title>Private Chat</title>
+    <link rel="stylesheet" href="./private-chat.css" />
+</head>
+<body>
+    <div class="chat-container">
+        <header>
+            <div class="peer-info">
+                <div class="avatar" id="peer-avatar">?</div>
+                <div class="peer-details">
+                    <span class="peer-name" id="peer-name">Chat</span>
+                    <span class="peer-status" id="peer-status">online</span>
+                </div>
+            </div>
+        </header>
+        
+        <div class="messages" id="messages">
+            <p class="empty-state">No messages yet</p>
+        </div>
+        
+        <div class="input-area">
+            <input type="text" id="message-input" placeholder="Type a message..." maxlength="500">
+            <button id="send-btn">Send</button>
+        </div>
+        
+        <div class="typing-indicator" id="typing-indicator"></div>
+    </div>
+    <script type="module" src="./private-chat.js"></script>
+</body>
+</html>

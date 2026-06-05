@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="/direct-chat.css" />
+    <title>Direct Chat</title>
+    <script type="module" src="/direct-chat.js" defer></script>
+  </head>
+  <body>
+    <main class="chat-window">
+      <header class="dm-header">
+        <div class="avatar" id="peer-avatar">DM</div>
+        <div>
+          <h1 id="peer-name">Direct Message</h1>
+          <p id="peer-meta">Waiting for peer info...</p>
+        </div>
+      </header>
+
+      <section id="messages" class="messages">
+        <div class="empty">No messages yet</div>
+      </section>
+
+      <footer class="composer">
+        <input id="message-input" type="text" placeholder="Type a message..." />
+        <button id="send-message">Send</button>
+      </footer>
+    </main>
+  </body>
+</html>

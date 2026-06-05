@@ -1,0 +1,162 @@
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap");
+
+:root {
+  --bg: #f0fdfa;
+  --panel: #ffffff;
+  --text: #134e4a;
+  --muted: #427672;
+  --border: #99f6e4;
+  --mine: #ecfff4;
+  --theirs: #ffffff;
+  --header-start: #2a64d6;
+  --header-end: #5f8df3;
+  --composer-input: #f8fffd;
+}
+
+body.dark {
+  --bg: #071516;
+  --panel: #0f2526;
+  --text: #d2f6f2;
+  --muted: #8ec9c2;
+  --border: #1f4f4b;
+  --mine: #14372a;
+  --theirs: #143032;
+  --header-start: #1d4b9f;
+  --header-end: #3b6ccf;
+  --composer-input: #102a2b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  font-family: "Plus Jakarta Sans", ui-sans-serif, sans-serif;
+  color: var(--text);
+  background: linear-gradient(180deg, var(--panel), var(--bg));
+}
+
+.chat-window {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+.dm-header {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  background: linear-gradient(120deg, var(--header-start), var(--header-end));
+  color: #ffffff;
+}
+
+.avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.22);
+  display: grid;
+  place-items: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.dm-header h1 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.dm-header p {
+  margin: 3px 0 0;
+  font-size: 0.8rem;
+  opacity: 0.94;
+}
+
+.messages {
+  padding: 10px;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  background: linear-gradient(180deg, var(--panel) 0%, var(--bg) 100%);
+}
+
+.empty {
+  border: 1px dashed #cfdbf9;
+  border-radius: 10px;
+  padding: 10px;
+  color: #47628f;
+}
+
+.bubble {
+  max-width: 92%;
+  border: 1px solid #cfdbf9;
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: var(--theirs);
+  box-shadow: 0 2px 9px rgba(39, 91, 201, 0.08);
+}
+
+.bubble.mine {
+  margin-left: auto;
+  background: var(--mine);
+  border-color: #a8f0c2;
+}
+
+.bubble strong {
+  font-size: 0.82rem;
+}
+
+.meta {
+  margin-top: 4px;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.composer input,
+.composer button {
+  height: 36px;
+  border-radius: 10px;
+}
+
+.composer input {
+  border: 1px solid #ccfbf1;
+  padding: 0 11px;
+  color: var(--text);
+  background: var(--composer-input);
+}
+
+.composer button {
+  min-width: 84px;
+  border: none;
+  color: #ffffff;
+  font-weight: 600;
+  cursor: pointer;
+  background: linear-gradient(135deg, #0d9488, #14b8a6);
+}
+
+.composer button:hover {
+  filter: saturate(1.15) brightness(1.03);
+}
+
+.composer button:focus-visible,
+.composer input:focus-visible {
+  outline: 2px solid #f97316;
+  outline-offset: 1px;
+}

@@ -1,0 +1,483 @@
+@import url("https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap");
+
+:root {
+  --bg: #f0fdfa;
+  --panel: #ffffff;
+  --text: #134e4a;
+  --muted: #427672;
+  --primary: #0d9488;
+  --secondary: #14b8a6;
+  --action: #f97316;
+  --border: #99f6e4;
+  --ink: #082f2f;
+  --input-bg: #f8fffd;
+  --card-bg: #f8fffd;
+}
+
+body.dark {
+  --bg: #071516;
+  --panel: #0f2426;
+  --text: #d2f6f2;
+  --muted: #8ec9c2;
+  --primary: #0ea5a0;
+  --secondary: #14b8a6;
+  --action: #fb923c;
+  --border: #1f4f4b;
+  --ink: #031312;
+  --input-bg: #102a2b;
+  --card-bg: #102a2b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--text);
+  min-height: 100vh;
+  font-family: "Plus Jakarta Sans", ui-sans-serif, sans-serif;
+  background:
+    radial-gradient(circle at 12% 16%, rgba(20, 184, 166, 0.2), transparent 35%),
+    radial-gradient(circle at 82% 8%, rgba(249, 115, 22, 0.16), transparent 30%),
+    linear-gradient(180deg, var(--panel) 0%, var(--bg) 100%);
+}
+
+.container {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 52px 20px 32px;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 2rem;
+  letter-spacing: 0.01em;
+}
+
+.topbar p {
+  margin: 3px 0 0;
+  color: var(--muted);
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.status-pill {
+  background: var(--ink);
+  color: #fff;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.options-btn {
+  background: linear-gradient(135deg, #0f766e, #14b8a6);
+  height: 34px;
+  border-radius: 999px;
+  padding: 0 14px;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(310px, 370px) 1fr;
+  gap: 16px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 10px 28px rgba(7, 89, 84, 0.1);
+  padding: 16px;
+}
+
+.panel h2 {
+  margin: 0 0 10px;
+  font-size: 1.1rem;
+}
+
+.panel-peers {
+  min-height: 340px;
+}
+
+.panel-activity {
+  grid-column: 1 / -1;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.field-inline {
+  grid-template-columns: 1fr;
+}
+
+.field label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+input,
+select,
+button {
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid #ccfbf1;
+  font-family: "Plus Jakarta Sans", ui-sans-serif, sans-serif;
+}
+
+input,
+select {
+  background: var(--input-bg);
+  padding: 0 11px;
+  color: var(--text);
+}
+
+button {
+  border: none;
+  background: linear-gradient(135deg, var(--primary), var(--secondary));
+  color: #fff;
+  font-weight: 700;
+  padding: 0 12px;
+  cursor: pointer;
+  transition: filter 200ms ease;
+}
+
+button:hover {
+  filter: saturate(1.15) brightness(1.03);
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--action);
+  outline-offset: 1px;
+}
+
+.field-inline input {
+  margin-bottom: 8px;
+}
+
+.advanced-card {
+  margin-top: 12px;
+  border: 1px dashed #8fe9d8;
+  border-radius: 10px;
+  background: var(--card-bg);
+  padding: 10px;
+}
+
+.advanced-card summary {
+  cursor: pointer;
+  color: #145f59;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.advanced-card[open] summary {
+  margin-bottom: 8px;
+}
+
+.tab-header {
+  display: inline-flex;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 5px;
+  border-radius: 999px;
+  background: #e6fffa;
+  border: 1px solid #b9f6e9;
+}
+
+.tab-btn {
+  height: 32px;
+  border-radius: 999px;
+  background: transparent;
+  color: #145f59;
+  padding: 0 13px;
+}
+
+.tab-btn.active {
+  background: linear-gradient(135deg, #0f766e, #14b8a6);
+  color: #ffffff;
+}
+
+.tab-panel {
+  display: none;
+}
+
+.tab-panel.active {
+  display: block;
+}
+
+.tip-text {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.peers-summary {
+  font-size: 0.9rem;
+  margin-bottom: 10px;
+  color: var(--muted);
+}
+
+.peer-list {
+  display: grid;
+  gap: 8px;
+}
+
+.peer-card {
+  border: 1px solid #ccfbf1;
+  border-left: 8px solid var(--secondary);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--card-bg);
+}
+
+.peer-name {
+  font-weight: 800;
+}
+
+.peer-meta {
+  font-family: "Fira Code", monospace;
+  font-size: 0.8rem;
+  color: #16625c;
+}
+
+.peer-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+}
+
+.ping-btn,
+.chat-btn {
+  width: 96px;
+  height: 30px;
+  border-radius: 8px;
+}
+
+.ping-btn {
+  background: linear-gradient(135deg, #f97316, #fb923c);
+}
+
+.chat-btn {
+  background: linear-gradient(135deg, #0f766e, #14b8a6);
+}
+
+.ping-btn.is-sending {
+  background: linear-gradient(135deg, #0ea5e9, #38bdf8);
+}
+
+.ping-btn.is-sent {
+  background: linear-gradient(135deg, #16a34a, #22c55e);
+}
+
+.ping-btn.is-failed {
+  background: linear-gradient(135deg, #dc2626, #ef4444);
+}
+
+.chat-panel {
+  border: 1px solid #99f6e4;
+  border-radius: 12px;
+  padding: 10px;
+  background: var(--card-bg);
+}
+
+.chat-messages {
+  border: 1px solid #ccfbf1;
+  border-radius: 10px;
+  background: var(--panel);
+  min-height: 180px;
+  max-height: 280px;
+  overflow: auto;
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.chat-bubble {
+  border: 1px solid #ccfbf1;
+  border-left: 6px solid #14b8a6;
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 6px 8px;
+}
+
+.chat-bubble.mine {
+  border-left-color: #f97316;
+}
+
+.chat-meta {
+  font-family: "Fira Code", monospace;
+  font-size: 0.72rem;
+  color: #16625c;
+}
+
+.chat-input-row {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.chat-input-row input {
+  height: 34px;
+}
+
+.empty-state {
+  border: 1px dashed #99f6e4;
+  border-radius: 10px;
+  padding: 12px;
+  color: var(--muted);
+}
+
+.hidden-tech {
+  display: none;
+}
+
+pre {
+  margin: 0;
+  padding: 10px;
+  min-height: 88px;
+  border-radius: 10px;
+  border: 1px solid #0f766e;
+  color: #ccfbf1;
+  background: linear-gradient(160deg, #07332f, #042a2a);
+  font-family: "Fira Code", monospace;
+  font-size: 0.75rem;
+  line-height: 1.55;
+  overflow: auto;
+}
+
+.module-list {
+  margin: 0;
+  padding: 10px 0 0 18px;
+  display: grid;
+  gap: 4px;
+  color: #0b4f4a;
+  font-size: 0.86rem;
+}
+
+.ping-feed {
+  display: grid;
+  gap: 8px;
+  max-height: 250px;
+  overflow: auto;
+}
+
+.ping-item {
+  border: 1px solid #ccfbf1;
+  border-radius: 10px;
+  padding: 8px;
+  background: var(--card-bg);
+}
+
+.ping-item.outgoing {
+  border-left: 8px solid #fb923c;
+}
+
+.ping-item.incoming {
+  border-left: 8px solid #14b8a6;
+}
+
+.ping-item.failed {
+  border-left: 8px solid #ef4444;
+}
+
+.ping-title {
+  font-weight: 700;
+  font-size: 0.87rem;
+}
+
+.ping-meta {
+  font-family: "Fira Code", monospace;
+  font-size: 0.75rem;
+  color: #16625c;
+}
+
+.ping-actions {
+  margin-top: 8px;
+}
+
+.ping-name-btn {
+  height: 28px;
+  min-width: 110px;
+  border-radius: 999px;
+  padding: 0 12px;
+  background: linear-gradient(135deg, #2a64d6, #5f8df3);
+  font-size: 0.78rem;
+}
+
+.ping-alias-editor {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 6px;
+}
+
+.ping-alias-input {
+  height: 30px;
+  border-radius: 8px;
+  padding: 0 9px;
+}
+
+.ping-alias-save,
+.ping-alias-cancel {
+  height: 30px;
+  min-width: 62px;
+  border-radius: 8px;
+  font-size: 0.78rem;
+}
+
+.ping-alias-cancel {
+  background: linear-gradient(135deg, #6b7280, #9ca3af);
+}
+
+@media (max-width: 1080px) {
+  .container {
+    padding-top: 18px;
+  }
+
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .panel-activity {
+    grid-column: auto;
+  }
+
+  .topbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .topbar-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .status-pill {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}

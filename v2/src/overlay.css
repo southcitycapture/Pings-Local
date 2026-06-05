@@ -1,0 +1,81 @@
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+
+:root {
+  --effect-rgb: 20, 184, 166;
+  --effect-opacity: 0.9;
+  --border-thickness: 28px;
+  --effect-feather: 42px;
+  --effect-duration: 1150ms;
+  --effect-scale: 2.0;
+}
+
+#overlay-root {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.circle,
+.border {
+  display: none;
+}
+
+.circle.active {
+  display: block;
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 320px;
+  height: 320px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(var(--effect-rgb), var(--effect-opacity)) 0%,
+    rgba(var(--effect-rgb), calc(var(--effect-opacity) * 0.42)) 42%,
+    transparent 74%
+  );
+  filter: blur(calc(var(--effect-feather) * 0.18));
+  animation: circle-pulse var(--effect-duration) ease-out;
+}
+
+.border.active {
+  display: block;
+  position: absolute;
+  inset: 0;
+  border: 0 solid rgba(var(--effect-rgb), var(--effect-opacity));
+  box-shadow: inset 0 0 var(--effect-feather) rgba(var(--effect-rgb), calc(var(--effect-opacity) * 0.65));
+  animation: border-pulse var(--effect-duration) ease-out;
+}
+
+@keyframes circle-pulse {
+  0% {
+    transform: scale(0.35);
+    opacity: 0.95;
+  }
+  100% {
+    transform: scale(var(--effect-scale));
+    opacity: 0;
+  }
+}
+
+@keyframes border-pulse {
+  0% {
+    border-width: 0px;
+    opacity: 0.95;
+  }
+  55% {
+    border-width: var(--border-thickness);
+    opacity: 0.9;
+  }
+  100% {
+    border-width: 0px;
+    opacity: 0;
+  }
+}

@@ -1,0 +1,168 @@
+@import url("https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap");
+
+:root {
+  --bg: #effcf9;
+  --panel: #ffffff;
+  --text: #134e4a;
+  --muted: #427672;
+  --border: #99f6e4;
+  --input: #f8fffd;
+}
+
+body.dark {
+  --bg: #081617;
+  --panel: #0f2526;
+  --text: #d2f6f2;
+  --muted: #8ec9c2;
+  --border: #1f4f4b;
+  --input: #102a2b;
+}
+
+body {
+  margin: 0;
+  font-family: "Plus Jakarta Sans", ui-sans-serif, sans-serif;
+  color: var(--text);
+  background: linear-gradient(160deg, var(--panel), var(--bg));
+}
+
+.options-wrap {
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.card h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+input[type="range"],
+input[type="color"],
+select,
+button {
+  width: 100%;
+}
+
+select,
+button {
+  height: 34px;
+  border-radius: 9px;
+}
+
+select {
+  border: 1px solid var(--border);
+  background: var(--input);
+  color: var(--text);
+}
+
+button {
+  border: 1px solid transparent;
+  background: linear-gradient(135deg, #0d9488, #14b8a6);
+  color: #ffffff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.muted-note {
+  margin: 0;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+
+#update-status[data-tone="info"] {
+  color: #0f766e;
+}
+
+#update-status[data-tone="success"] {
+  color: #047857;
+  font-weight: 700;
+}
+
+#update-status[data-tone="error"] {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.avatar-row {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: 12px;
+  align-items: center;
+}
+
+.avatar-preview {
+  width: 84px;
+  height: 84px;
+  border-radius: 16px;
+  border: 1px dashed var(--border);
+  background: var(--input);
+}
+
+.avatar-preview.has-avatar {
+  border-style: solid;
+  object-fit: cover;
+}
+
+.avatar-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.file-label {
+  display: grid;
+  place-items: center;
+  height: 34px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #2563eb, #4f8df5);
+  color: #ffffff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+#profile-avatar-input {
+  display: none;
+}
+
+#status {
+  margin: 0;
+  font-family: "Fira Code", monospace;
+  font-size: 0.74rem;
+  background: #062f2d;
+  color: #ccfbf1;
+  border: 1px solid #0f766e;
+  border-radius: 10px;
+  padding: 10px;
+  min-height: 90px;
+}

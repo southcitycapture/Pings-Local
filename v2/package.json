@@ -1,0 +1,28 @@
+{
+  "name": "pings-v2",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev:web": "vite --port 1420 --strictPort",
+    "build:web": "vite build",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "build:mac:arm64": "tauri build --target aarch64-apple-darwin",
+    "build:mac:x64": "tauri build --target x86_64-apple-darwin",
+    "build:linux:x64": "tauri build --target x86_64-unknown-linux-gnu",
+    "updates:prepare": "node scripts/prepare-local-update.mjs",
+    "updates:serve": "node scripts/serve-local-updates.mjs",
+    "updates:local": "npm run updates:prepare && npm run updates:serve",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "vite": "^7.2.1"
+  },
+  "dependencies": {
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.0",
+    "socket.io-client": "^4.8.3"
+  }
+}

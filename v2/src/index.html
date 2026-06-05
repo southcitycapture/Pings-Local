@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pings v2</title>
+    <script type="module" src="/main.js" defer></script>
+  </head>
+
+  <body>
+    <main class="container">
+      <header class="topbar">
+        <div>
+          <h1>Pings</h1>
+          <p>Send a quick ping or chat with your team.</p>
+        </div>
+        <div class="topbar-actions">
+          <button id="open-options" class="options-btn">Settings</button>
+          <div class="status-pill" id="active-status">Checking network...</div>
+        </div>
+      </header>
+
+      <section class="layout">
+        <article class="panel panel-controls">
+          <h2>Your Settings</h2>
+          <div class="field field-inline">
+            <label for="profile-name">Your Name</label>
+            <input id="profile-name" type="text" placeholder="Your name" />
+            <button id="save-profile">Save Name</button>
+          </div>
+          <div class="field field-inline">
+            <label for="custom-message">Default Ping Message</label>
+            <input id="custom-message" type="text" placeholder="Meeting in 5" />
+            <button id="save-custom-message">Save Message</button>
+          </div>
+          <div class="field">
+            <label for="ping-sound">Default Ping Sound</label>
+            <select id="ping-sound">
+              <option value="light">Light</option>
+              <option value="chime">Chime</option>
+              <option value="bubble">Bubble</option>
+              <option value="tap">Tap</option>
+              <option value="bell">Bell</option>
+              <option value="drop">Drop</option>
+              <option value="off">Off</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="ping-shape">Default Ping Style</label>
+            <select id="ping-shape">
+              <option value="circle">Circle</option>
+              <option value="border">Border</option>
+            </select>
+          </div>
+
+          <details class="advanced-card">
+            <summary>Network Settings (Advanced)</summary>
+            <div class="field">
+              <label for="preferred-ip">Preferred Interface/IP</label>
+              <select id="preferred-ip"></select>
+            </div>
+            <div class="field field-inline">
+              <label for="discovery-node-ip">Discovery Node</label>
+              <input id="discovery-node-ip" type="text" placeholder="192.168.1.42" />
+              <button id="set-node-ip">Apply</button>
+            </div>
+          </details>
+        </article>
+
+        <article class="panel panel-peers">
+          <div class="tab-header">
+            <button class="tab-btn active" data-tab="people">People</button>
+            <button class="tab-btn" data-tab="team">Team Chat</button>
+          </div>
+
+          <section class="tab-panel active" data-panel="people">
+            <h2>People Nearby</h2>
+            <div id="peers-summary" class="peers-summary">No peers yet</div>
+            <div id="peers-list" class="peer-list">
+              <div class="empty-state">Waiting for LAN peers...</div>
+            </div>
+            <p class="tip-text">Tip: click <strong>Message</strong> to open a 1:1 chat window.</p>
+          </section>
+
+          <section class="tab-panel" data-panel="team">
+            <h2>Team Chat</h2>
+            <div class="chat-panel">
+              <div id="team-chat-messages" class="chat-messages"></div>
+              <div class="chat-input-row">
+                <input id="team-chat-input" type="text" placeholder="Message everyone..." />
+                <button id="send-team-chat">Send</button>
+              </div>
+            </div>
+          </section>
+        </article>
+
+        <article class="panel panel-activity">
+          <h2>Recent Activity</h2>
+          <div id="ping-feed" class="ping-feed">
+            <div class="empty-state">No pings yet</div>
+          </div>
+          <pre id="health" class="hidden-tech">Loading...</pre>
+          <pre id="network-status" class="hidden-tech">Loading...</pre>
+          <pre id="persistence-status" class="hidden-tech">Loading...</pre>
+          <ul id="modules" class="module-list hidden-tech"></ul>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>
