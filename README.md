@@ -1,37 +1,24 @@
-# 🔔 Pings for macOS
+# Pings v2 (Tauri)
 
-Welcome to **Pings**! This app helps you get your colleagues' attention in the office without interrupting their flow. When you "ping" someone, a friendly red circle pulses on their screen.
+Pings v2 is the macOS-first migration from Electron to Tauri, with Linux planned after mac parity.
 
-## 🚀 How to Run the App
+## Run
 
-You don't need any complex software like Xcode! Just follow these simple steps:
+```bash
+cd /Users/zachjack/Apps/Pings
+npm install
+npm run dev
+```
 
-1. **Open Terminal**: You can find it in your Applications folder or search with Spotlight (Cmd + Space).
-2. **Go to the App Folder**:
-   ```bash
-   cd ~/Apps/Pings
-   ```
-3. **Start the App**:
-   ```bash
-   npm start
-   ```
+## Build Targets
 
-## 📦 How to Send it to Colleagues
+```bash
+npm run build:mac:arm64
+npm run build:mac:x64
+# later
+npm run build:linux:x64
+```
 
-If you want to give the app to someone else in the office:
+## Migration Docs
 
-1. **Create the Installer**:
-   ```bash
-   npm run package
-   ```
-2. **Find the File**: Look in the `dist` folder that appears in your `Pings` directory. You'll see a `.dmg` file.
-3. **Share**: Just send that `.dmg` file to your colleague! They can double-click it to install Pings just like any other Mac app.
-
-## ⚙️ Settings
-
-- Click the **Tray Icon** (the little icon in your top menu bar) to open the Dashboard.
-- In the Dashboard, you can choose if the red circle appears in the **Top Left** or **Top Right** of your screen.
-- You can also toggle **Sound Effects** on or off.
-
----
-*Built with ❤️ for the office.*
+- [`V2_MIGRATION_PLAN.md`](./V2_MIGRATION_PLAN.md)

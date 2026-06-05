@@ -1,78 +1,28 @@
 {
-  "name": "pings",
-  "version": "1.3.0",
-  "description": "Office Pinging app for macOS - Chat, pings, and more",
-  "main": "./out/main/index.js",
+  "name": "pings-v2",
+  "private": true,
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "start": "electron-vite dev",
-    "build": "electron-vite build",
-    "preview": "electron-vite preview",
-    "package": "npm run build && electron-builder --mac",
-    "package:intel": "npm run build && electron-builder --mac intel",
-    "package:arm64": "npm run build && electron-builder --mac arm64",
-    "package:universal": "npm run build && electron-builder --mac --x64 --arm64",
-    "generate-icons": "node scripts/generate-icons.js"
+    "dev:web": "vite --port 1420 --strictPort",
+    "build:web": "vite build",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "build:mac:arm64": "tauri build --target aarch64-apple-darwin",
+    "build:mac:x64": "tauri build --target x86_64-apple-darwin",
+    "build:linux:x64": "tauri build --target x86_64-unknown-linux-gnu",
+    "updates:prepare": "node scripts/prepare-local-update.mjs",
+    "updates:serve": "node scripts/serve-local-updates.mjs",
+    "updates:local": "npm run updates:prepare && npm run updates:serve",
+    "tauri": "tauri"
   },
-  "build": {
-    "appId": "com.pings.app",
-    "productName": "Pings",
-    "directories": {
-      "output": "dist",
-      "buildResources": "resources"
-    },
-    "files": [
-      "out/**/*",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "resources/tray-icon.png",
-        "to": "tray-icon.png"
-      },
-      {
-        "from": "resources/tray-icon@2x.png",
-        "to": "tray-icon@2x.png"
-      }
-    ],
-    "mac": {
-      "category": "public.app-category.productivity",
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "icon": "resources/icon.png",
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false
-    },
-    "dmg": {
-      "contents": [
-        {
-          "x": 130,
-          "y": 220
-        },
-        {
-          "x": 410,
-          "y": 220,
-          "type": "link",
-          "path": "/Applications"
-        }
-      ]
-    }
-  },
-  "keywords": ["pings", "chat", "office", "attention", "notification", "macos"],
-  "author": "",
-  "license": "ISC",
   "devDependencies": {
-    "electron": "^40.4.0",
-    "electron-builder": "^26.7.0",
-    "electron-vite": "^5.0.0",
-    "vite": "^7.3.1"
+    "@tauri-apps/cli": "^2",
+    "vite": "^7.2.1"
   },
   "dependencies": {
-    "@electron-toolkit/utils": "^4.0.0",
-    "multicast-dns": "^7.2.5",
-    "socket.io": "^4.8.3",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.0",
     "socket.io-client": "^4.8.3"
   }
 }
