@@ -1,0 +1,732 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Pings v3 — Design Direction</title>
+<style>
+  :root {
+    --ground: #f5f7f6;
+    --surface: #ffffff;
+    --inset: #eef2f1;
+    --ink: #17211e;
+    --muted: #5e6e6a;
+    --line: #e2e8e6;
+    --accent: #0e7c6e;
+    --accent-soft: #e3f1ee;
+    --ping-bg: #b45309;
+    --ping-ink: #ffffff;
+    --ping-soft: #f6ede1;
+    --green: #1f9d63;
+    --red: #c43d3d;
+    --shadow: 0 1px 2px rgba(23, 33, 30, 0.06), 0 8px 24px rgba(23, 33, 30, 0.08);
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0f1514;
+      --surface: #161d1b;
+      --inset: #1d2624;
+      --ink: #e6eeeb;
+      --muted: #8aa09a;
+      --line: #263230;
+      --accent: #3ec9b2;
+      --accent-soft: #17302b;
+      --ping-bg: #f0a63c;
+      --ping-ink: #241505;
+      --ping-soft: #2b2115;
+      --green: #3dbe84;
+      --red: #e06c6c;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 28px rgba(0, 0, 0, 0.45);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0f1514;
+    --surface: #161d1b;
+    --inset: #1d2624;
+    --ink: #e6eeeb;
+    --muted: #8aa09a;
+    --line: #263230;
+    --accent: #3ec9b2;
+    --accent-soft: #17302b;
+    --ping-bg: #f0a63c;
+    --ping-ink: #241505;
+    --ping-soft: #2b2115;
+    --green: #3dbe84;
+    --red: #e06c6c;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 28px rgba(0, 0, 0, 0.45);
+  }
+  :root[data-theme="light"] {
+    --ground: #f5f7f6;
+    --surface: #ffffff;
+    --inset: #eef2f1;
+    --ink: #17211e;
+    --muted: #5e6e6a;
+    --line: #e2e8e6;
+    --accent: #0e7c6e;
+    --accent-soft: #e3f1ee;
+    --ping-bg: #b45309;
+    --ping-ink: #ffffff;
+    --ping-soft: #f6ede1;
+    --green: #1f9d63;
+    --red: #c43d3d;
+    --shadow: 0 1px 2px rgba(23, 33, 30, 0.06), 0 8px 24px rgba(23, 33, 30, 0.08);
+  }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 56px 24px 80px;
+    display: flex;
+    flex-direction: column;
+    gap: 64px;
+  }
+
+  /* ---------- pitch chrome ---------- */
+  .eyebrow {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 12px;
+  }
+  h1 {
+    font-size: clamp(28px, 4.5vw, 42px);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.12;
+    margin: 0 0 12px;
+    text-wrap: balance;
+  }
+  .lede {
+    font-size: 17px;
+    color: var(--muted);
+    max-width: 58ch;
+    margin: 0;
+  }
+  .lede strong { color: var(--ink); font-weight: 600; }
+  h2 {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0 0 6px;
+  }
+  .section-sub {
+    font-size: 14px;
+    color: var(--muted);
+    margin: 0 0 24px;
+    max-width: 62ch;
+  }
+  .caption {
+    font-size: 13px;
+    color: var(--muted);
+    margin: 12px 0 0;
+    max-width: 40ch;
+  }
+
+  /* ---------- hero layout ---------- */
+  .hero {
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    gap: 48px;
+    align-items: start;
+  }
+  @media (max-width: 820px) {
+    .hero { grid-template-columns: 1fr; }
+  }
+  .notes { display: flex; flex-direction: column; gap: 20px; padding-top: 8px; }
+  .note h3 {
+    font-size: 14px;
+    font-weight: 650;
+    margin: 0 0 3px;
+  }
+  .note p { font-size: 14px; color: var(--muted); margin: 0; max-width: 52ch; }
+
+  /* ---------- shared window chrome ---------- */
+  .window {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .titlebar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 14px 10px;
+  }
+  .dots { display: flex; gap: 7px; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .dot.r { background: #ec6a5e; }
+  .dot.y { background: #f4bf4f; }
+  .dot.g { background: #61c554; }
+  .titlebar .win-title {
+    flex: 1;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    margin-right: 40px; /* balance the dots */
+  }
+
+  /* ---------- main window mockup ---------- */
+  .app { width: 380px; max-width: 100%; }
+  .self-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 16px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .avatar {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 13px;
+    font-weight: 700;
+    flex: none;
+  }
+  .av-teal { background: var(--accent-soft); color: var(--accent); }
+  .av-plum { background: rgba(146, 106, 200, 0.16); color: #8a63c0; }
+  .av-blue { background: rgba(64, 130, 190, 0.15); color: #3d7fb5; }
+  .av-rust { background: rgba(196, 112, 72, 0.15); color: #b05e33; }
+  .who { flex: 1; min-width: 0; }
+  .who .name {
+    font-size: 14px;
+    font-weight: 650;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .presence { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex: none; }
+  .presence.away { background: var(--line); }
+  .who .sub {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .icon-btn {
+    width: 28px;
+    height: 28px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    display: grid;
+    place-items: center;
+    font-size: 13px;
+  }
+  .palette-hint {
+    margin: 12px 16px 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--inset);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .kbd {
+    font-family: var(--mono);
+    font-size: 11px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 1px 5px;
+    color: var(--muted);
+  }
+  .section-label {
+    font-size: 11px;
+    font-weight: 650;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 14px 16px 6px;
+  }
+  .peer-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px;
+  }
+  .peer-row.hovered { background: var(--inset); }
+  .row-actions { display: flex; gap: 6px; align-items: center; }
+  .btn-ping {
+    background: var(--ping-bg);
+    color: var(--ping-ink);
+    font-size: 12px;
+    font-weight: 650;
+    border: none;
+    border-radius: 6px;
+    padding: 5px 12px;
+  }
+  .btn-msg {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    color: var(--ink);
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 6px;
+    padding: 5px 10px;
+  }
+  .sent-chip {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ping-bg);
+    background: var(--ping-soft);
+    border-radius: 6px;
+    padding: 4px 9px;
+  }
+  .unread {
+    min-width: 18px;
+    height: 18px;
+    border-radius: 9px;
+    background: var(--accent);
+    color: var(--surface);
+    font-size: 11px;
+    font-weight: 700;
+    display: grid;
+    place-items: center;
+    padding: 0 5px;
+  }
+  .app-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-top: 1px solid var(--line);
+    margin-top: 10px;
+    padding: 9px 16px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .app-footer .link { color: var(--accent); font-weight: 600; }
+
+  /* ---------- concepts row ---------- */
+  .concepts {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+  @media (max-width: 900px) { .concepts { grid-template-columns: 1fr; } }
+  .concept { min-width: 0; }
+
+  /* overlay */
+  .screen {
+    position: relative;
+    aspect-ratio: 16 / 10;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background:
+      radial-gradient(120% 100% at 20% 0%, var(--inset), transparent 60%),
+      var(--surface);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .glow {
+    position: absolute;
+    inset: 0;
+    border-radius: 10px;
+    box-shadow: inset 0 0 0 3px var(--accent), inset 0 0 28px rgba(20, 160, 140, 0.35);
+    opacity: 0.85;
+    pointer-events: none;
+  }
+  .toast {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    left: 12px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    padding: 10px 12px;
+  }
+  .toast-head { display: flex; align-items: center; gap: 8px; }
+  .toast .avatar { width: 26px; height: 26px; font-size: 11px; }
+  .toast-title { font-size: 13px; font-weight: 650; }
+  .toast-msg { font-size: 12px; color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+  .chip {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-radius: 999px;
+    padding: 3px 9px;
+  }
+
+  /* palette */
+  .palette {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .palette-input {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--line);
+    font-size: 15px;
+  }
+  .caret {
+    display: inline-block;
+    width: 1.5px;
+    height: 17px;
+    background: var(--accent);
+    vertical-align: text-bottom;
+  }
+  .pal-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 14px;
+    font-size: 13px;
+  }
+  .pal-row.sel { background: var(--accent-soft); }
+  .pal-row .avatar { width: 26px; height: 26px; font-size: 11px; }
+  .pal-name { flex: 1; font-weight: 600; }
+  .pal-hint { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .pal-footer {
+    display: flex;
+    gap: 14px;
+    padding: 9px 14px;
+    border-top: 1px solid var(--line);
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  /* dm window */
+  .dm { display: flex; flex-direction: column; }
+  .dm-body { display: flex; flex-direction: column; gap: 8px; padding: 6px 12px 12px; }
+  .bubble {
+    max-width: 78%;
+    font-size: 13px;
+    padding: 7px 11px;
+    border-radius: 10px;
+    background: var(--inset);
+    align-self: flex-start;
+  }
+  .bubble.mine {
+    align-self: flex-end;
+    background: var(--accent);
+    color: var(--surface);
+  }
+  .delivery {
+    align-self: flex-end;
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: -4px;
+    font-family: var(--mono);
+  }
+  .composer {
+    display: flex;
+    gap: 8px;
+    padding: 10px 12px;
+    border-top: 1px solid var(--line);
+  }
+  .composer .field {
+    flex: 1;
+    border: 1px solid var(--line);
+    background: var(--inset);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .composer .send {
+    border: none;
+    border-radius: 6px;
+    background: var(--accent);
+    color: var(--surface);
+    font-size: 12px;
+    font-weight: 650;
+    padding: 0 12px;
+  }
+
+  /* ---------- tokens ---------- */
+  .tokens {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 12px;
+  }
+  .token {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 12px;
+  }
+  .swatch { height: 44px; border-radius: 6px; border: 1px solid var(--line); margin-bottom: 8px; }
+  .token .t-name { font-size: 13px; font-weight: 650; }
+  .token .t-vals {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .type-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .type-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .type-card .sample { font-size: 17px; font-weight: 650; }
+  .type-card .sample.mono { font-family: var(--mono); font-weight: 500; font-size: 14px; }
+  .type-card .t-vals { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  .rule-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+  .rule-list li { font-size: 14px; color: var(--muted); padding-left: 18px; position: relative; }
+  .rule-list li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 8px;
+    width: 6px;
+    height: 6px;
+    border-radius: 2px;
+    background: var(--accent);
+  }
+  .rule-list strong { color: var(--ink); font-weight: 600; }
+</style>
+</head>
+<body>
+
+
+<div class="page">
+  <header>
+    <p class="eyebrow">Pings v3 · Design direction</p>
+    <h1>See who's around.<br />Ping them in one keystroke.</h1>
+    <p class="lede">
+      v3 stops being a dashboard and becomes a <strong>presence utility</strong>: a compact
+      buddy list, a menubar quick-ping, and a ⌘K palette. Everything below is drawn with the
+      proposed token system — flip your theme to see dark mode.
+    </p>
+  </header>
+
+  <section class="hero">
+    <div class="window app" aria-hidden="true">
+      <div class="titlebar">
+        <div class="dots"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
+        <span class="win-title">Pings</span>
+      </div>
+      <div class="self-row">
+        <span class="avatar av-teal">ZJ</span>
+        <div class="who">
+          <div class="name">Zach <span class="presence"></span></div>
+          <div class="sub">10.0.1.24 · online</div>
+        </div>
+        <span class="icon-btn" title="Focus">◐</span>
+        <span class="icon-btn" title="Settings">⚙</span>
+      </div>
+      <div class="palette-hint"><span class="kbd">⌘K</span> Ping someone…</div>
+      <div class="section-label">On your network · 4</div>
+      <div class="peer-row hovered">
+        <span class="avatar av-plum">M</span>
+        <div class="who">
+          <div class="name">Marcus <span class="presence"></span></div>
+          <div class="sub">10.0.1.31 · 2m ago</div>
+        </div>
+        <div class="row-actions">
+          <span class="btn-msg">Message</span>
+          <span class="btn-ping">Ping</span>
+        </div>
+      </div>
+      <div class="peer-row">
+        <span class="avatar av-blue">P</span>
+        <div class="who">
+          <div class="name">Priya <span class="presence"></span></div>
+          <div class="sub">10.0.1.40 · just now</div>
+        </div>
+        <span class="unread">2</span>
+      </div>
+      <div class="peer-row">
+        <span class="avatar av-rust">FD</span>
+        <div class="who">
+          <div class="name">Front Desk <span class="presence"></span></div>
+          <div class="sub">10.0.1.18 · 14s ago</div>
+        </div>
+        <span class="sent-chip">Sent ✓</span>
+      </div>
+      <div class="peer-row">
+        <span class="avatar av-teal">RB</span>
+        <div class="who">
+          <div class="name">Render Box <span class="presence away"></span></div>
+          <div class="sub">10.0.1.77 · 23m ago</div>
+        </div>
+      </div>
+      <div class="app-footer">
+        <span>3 pings today</span>
+        <span class="link">Activity ▸</span>
+      </div>
+    </div>
+
+    <div class="notes">
+      <div>
+        <h2>The whole window is the peer list</h2>
+        <p class="section-sub">No settings panel, no debug readouts, no tabs. One row per person, one action per row.</p>
+      </div>
+      <div class="note">
+        <h3>Hover reveals the two verbs</h3>
+        <p>Ping and Message appear on hover; double-click a row pings. Amber belongs to the ping action alone — it's the one loud color in the app.</p>
+      </div>
+      <div class="note">
+        <h3>State is form, not prose</h3>
+        <p>A presence dot, an unread badge, a "Sent ✓" chip. No mono metadata paragraphs under every card — the IP and last-seen live in one quiet line.</p>
+      </div>
+      <div class="note">
+        <h3>Identity survives DHCP</h3>
+        <p>Rows are people (stable peer IDs), not IP addresses. Aliases, sounds, and history follow the person when their address changes.</p>
+      </div>
+      <div class="note">
+        <h3>Settings live in Settings</h3>
+        <p>One settings window. The gear is the only way in, and nothing in the main window needs saving.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The fast paths</h2>
+    <p class="section-sub">
+      The window is optional. The overlay, the palette, and the DM window are where Pings
+      actually gets used.
+    </p>
+    <div class="concepts">
+      <div class="concept" aria-hidden="true">
+        <div class="screen">
+          <div class="glow"></div>
+          <div class="toast">
+            <div class="toast-head">
+              <span class="avatar av-plum">M</span>
+              <div>
+                <div class="toast-title">Marcus pinged you</div>
+                <div class="toast-msg">"Meeting in 5"</div>
+              </div>
+            </div>
+            <div class="chips">
+              <span class="chip">On my way!</span>
+              <span class="chip">Be there in 5</span>
+              <span class="chip">👍</span>
+            </div>
+          </div>
+        </div>
+        <p class="caption"><strong>Overlay v2.</strong> Border glow honors your effect settings, respects Focus/DND, and quick replies answer without opening a window.</p>
+      </div>
+
+      <div class="concept" aria-hidden="true">
+        <div class="palette">
+          <div class="palette-input"><span style="color: var(--muted)">›</span> ma<span class="caret"></span></div>
+          <div class="pal-row sel">
+            <span class="avatar av-plum">M</span>
+            <span class="pal-name">Marcus</span>
+            <span class="pal-hint">10.0.1.31</span>
+          </div>
+          <div class="pal-row">
+            <span class="avatar av-rust">MR</span>
+            <span class="pal-name">Mail Room</span>
+            <span class="pal-hint">10.0.1.52</span>
+          </div>
+          <div class="pal-footer">
+            <span><span class="kbd">↵</span> Ping</span>
+            <span><span class="kbd">⇧↵</span> Ping with note</span>
+            <span><span class="kbd">⌘↵</span> Message</span>
+          </div>
+        </div>
+        <p class="caption"><strong>⌘K palette.</strong> Global shortcut, two letters, Enter. The "one keystroke" promise, available even when the window is closed.</p>
+      </div>
+
+      <div class="concept" aria-hidden="true">
+        <div class="window dm">
+          <div class="titlebar">
+            <div class="dots"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
+            <span class="win-title">Marcus</span>
+          </div>
+          <div class="dm-body">
+            <div class="bubble">Client just landed, come down when free</div>
+            <div class="bubble mine">On my way — 2 min</div>
+            <div class="delivery">✓✓ delivered</div>
+            <div class="bubble mine">Grabbing the proofs first</div>
+            <div class="delivery">✓ sent</div>
+          </div>
+          <div class="composer">
+            <span class="field">Message Marcus…</span>
+            <span class="send">Send</span>
+          </div>
+        </div>
+        <p class="caption"><strong>Delivery you can trust.</strong> Acks on the wire become ✓ sent / ✓✓ delivered — and history persists across restarts.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Token system</h2>
+    <p class="section-sub">
+      Ten custom properties drive every surface; dark mode is a token swap and nothing else.
+      No hex values in component CSS, no gradients on controls, no colored side-bars on cards.
+    </p>
+    <div class="tokens">
+      <div class="token"><div class="swatch" style="background: var(--ground)"></div><div class="t-name">Ground</div><div class="t-vals">#F5F7F6 / #0F1514</div></div>
+      <div class="token"><div class="swatch" style="background: var(--surface)"></div><div class="t-name">Surface</div><div class="t-vals">#FFFFFF / #161D1B</div></div>
+      <div class="token"><div class="swatch" style="background: var(--ink)"></div><div class="t-name">Ink</div><div class="t-vals">#17211E / #E6EEEB</div></div>
+      <div class="token"><div class="swatch" style="background: var(--muted)"></div><div class="t-name">Muted</div><div class="t-vals">#5E6E6A / #8AA09A</div></div>
+      <div class="token"><div class="swatch" style="background: var(--accent)"></div><div class="t-name">Accent — teal</div><div class="t-vals">#0E7C6E / #3EC9B2</div></div>
+      <div class="token"><div class="swatch" style="background: var(--ping-bg)"></div><div class="t-name">Ping — amber</div><div class="t-vals">#B45309 / #F0A63C</div></div>
+      <div class="token"><div class="swatch" style="background: var(--green)"></div><div class="t-name">Presence</div><div class="t-vals">#1F9D63 / #3DBE84</div></div>
+      <div class="token"><div class="swatch" style="background: var(--red)"></div><div class="t-name">Failure</div><div class="t-vals">#C43D3D / #E06C6C</div></div>
+    </div>
+    <div class="type-row">
+      <div class="type-card">
+        <div class="sample">System — SF Pro on macOS</div>
+        <div class="t-vals">UI text · a native app should speak the platform's typeface. No runtime font CDN.</div>
+      </div>
+      <div class="type-card">
+        <div class="sample mono">10.0.1.31 · 2m ago · ✓✓</div>
+        <div class="t-vals">ui-monospace for IPs, timestamps, delivery marks — tabular, quiet, secondary.</div>
+      </div>
+      <div class="type-card">
+        <div class="sample" style="font-size: 14px">8pt grid · radii 10 / 6 · 1px lines</div>
+        <div class="t-vals">Elevation from hairline borders and one soft shadow. Two corner radii, ever.</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What this replaces</h2>
+    <ul class="rule-list">
+      <li><strong>One accent instead of five gradients.</strong> v2 puts a teal→teal gradient on every button; v3 spends color only where it means something.</li>
+      <li><strong>Tokens instead of hard-coded teal.</strong> v2's dark mode half-breaks because metadata, tabs, and summaries hard-code light hex values.</li>
+      <li><strong>A buddy list instead of a three-panel dashboard.</strong> The settings form, the tab bar, and the activity log all leave the main window.</li>
+      <li><strong>Designed sounds instead of oscillator beeps</strong>, bundled with the app like the fonts.</li>
+      <li><strong>Real delivery states instead of fire-and-forget UDP</strong> — the ✓✓ in the DM mock is a protocol feature, not decoration.</li>
+    </ul>
+  </section>
+</div>
+
+</body>
+</html>
