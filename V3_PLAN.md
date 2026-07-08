@@ -60,7 +60,8 @@ Stop being a mini-Slack dashboard. Pings is a **presence utility**:
 - **Menubar/tray first.** Tray menu lists peers for one-click pings; the window is optional. Global shortcut summons a **⌘K palette**: type two letters of a name, Enter to ping, ⇧Enter to ping with a note.
 - **Activity is a drawer**, not a permanent third panel — a merged timeline (pings + chats) with day separators, persisted across restarts.
 - **One settings window.** The main window has zero settings UI.
-- **Overlay v2**: respects DND, honors the position setting, and shows the (currently dead) quick replies as one-click response chips.
+- **Overlay v2 — the full-screen border ping stays.** The whole-screen, click-through, always-on-top attention flash is the soul of the app and carries over intact, with every effect setting kept (color, thickness, feather, duration, circle vs. border). What's added: it finally respects DND, honors the position setting, and shows the (currently dead) quick replies as one-click response chips.
+- **Agent peers.** Because v3 peers are stable identities speaking a documented protocol, an AI agent can join the network as just another peer. Presence gains a `kind: human | agent` field; agents appear in the buddy list with a badge and can be pinged and DM'd like anyone else, with real delivery states. We ship a reference bridge — a small headless daemon that speaks the Pings protocol on one side and plugs a local model or agent harness (Ollama/llama.cpp, OpenClaw-style frameworks, Hermes-class local models) into the other — and the protocol doc lets anyone write their own agent without us.
 - **Real onboarding**: first run asks your name, previews the ping effect, done.
 
 ### Architecture
@@ -103,8 +104,9 @@ The full visual direction is mocked up in [`docs/v3-mockup.html`](./docs/v3-mock
 |-------|-------|---------|
 | **v3.0 — Core** | peerId + envelope protocol + acks, single-runtime networking, SQLite store, kill double-delivery | Solid foundation under the existing UI |
 | **v3.1 — Shell** | New main window + single settings window + DM windows on the shared frontend core | The redesign lands |
-| **v3.2 — Slick** | Tray quick-ping, global shortcut, ⌘K palette, overlay v2 (DND, position, quick replies), onboarding, real sounds | The "one keystroke" promise |
-| **v3.3 — Ship** | Signed HTTPS updater, CSP, packaging, Linux port | Distributable |
+| **v3.2 — Slick** | Tray quick-ping, global shortcut, ⌘K palette, overlay v2 (full-screen border effect + DND, position, quick replies), onboarding, real sounds | The "one keystroke" promise |
+| **v3.3 — Agents** | `kind: agent` presence, agent badge in the UI, reference bridge daemon for local models/harnesses, published protocol doc | AI teammates in the buddy list |
+| **v3.4 — Ship** | Signed HTTPS updater, CSP, packaging, Linux port | Distributable |
 
 ### What gets deleted
 
