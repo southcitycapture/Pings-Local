@@ -112,3 +112,7 @@ export async function onIncomingChatAck(callback) {
 export async function onSettingsUpdated(callback) {
   return listen("settings-updated", (event) => callback(event.payload));
 }
+
+export function hidePalette() {
+  return invoke("hide_palette");
+}

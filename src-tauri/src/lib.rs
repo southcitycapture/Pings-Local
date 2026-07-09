@@ -1,5 +1,6 @@
 mod networking;
 mod overlay;
+mod palette;
 mod persistence;
 mod store;
 mod tray;
@@ -229,6 +230,11 @@ fn get_direct_chat_context(window_label: String) -> Option<overlay::DirectChatCo
     overlay::get_direct_chat_context(&window_label)
 }
 
+#[tauri::command]
+fn hide_palette(app: AppHandle) {
+    palette::hide(&app);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let networking_state = NetworkingState::default();
@@ -238,6 +244,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(networking_state.clone())
         .setup(move |app| {
             overlay::ensure_overlay_window(app.handle());
@@ -263,6 +270,21 @@ pub fn run() {
             // Menubar tray with per-peer quick-ping. It's kept in sync directly
             // from networking::emit_peers_snapshot as the peer list changes.
             tray::init(app.handle(), networking_state.clone())?;
+
+            // Global shortcut (Cmd/Ctrl+Shift+K) toggles the command palette.
+            // Registration failing (e.g. the combo is taken) must not stop the
+            // app from launching.
+            {
+                use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+                let toggle = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyK);
+                if let Err(err) = app.global_shortcut().on_shortcut(toggle, |app, _shortcut, event| {
+                    if event.state() == ShortcutState::Pressed {
+                        palette::toggle(app);
+                    }
+                }) {
+                    eprintln!("[pings] failed to register palette shortcut: {err}");
+                }
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -295,7 +317,8 @@ pub fn run() {
             send_private_chat,
             open_options_window,
             open_direct_chat_window,
-            get_direct_chat_context
+            get_direct_chat_context,
+            hide_palette
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

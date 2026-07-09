@@ -144,8 +144,16 @@ The plan originally called for rewriting networking onto a single tokio runtime 
   deferred until the tray is confirmed rendering, so there's always an obvious
   way to quit during first testing.
 
-Still to do in v3.2: global shortcut + the ⌘K command-palette window (ping
-without opening anything), and overlay quick-reply chips.
+- **Global shortcut + command palette.** A global hotkey (**Cmd/Ctrl+Shift+K**)
+  toggles a borderless, always-on-top palette window: type to filter everyone on
+  the network, ↑/↓ to choose, **Enter** to ping, **Cmd+Enter** to message,
+  **Esc** to close — then it hides itself. The "one keystroke" promise, available
+  even when the main window is closed. Palette UI verified headless (filter +
+  selection, light/dark); the global-shortcut registration and window toggle need
+  on-device testing.
+
+Still to do in v3.2: overlay quick-reply chips (one-tap responses on the
+incoming-ping flash).
 
 ### v3.1 — Shell (the redesign lands)
 
