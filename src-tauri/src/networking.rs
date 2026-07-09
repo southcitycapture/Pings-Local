@@ -18,6 +18,18 @@ pub struct NetworkingState {
     pub inner: Arc<Mutex<NetworkRuntime>>,
 }
 
+impl NetworkingState {
+    /// Lock the runtime, recovering from a poisoned mutex instead of panicking.
+    /// If some thread panicked mid-update the data is possibly stale but still
+    /// structurally valid, so recovering keeps the rest of the app alive rather
+    /// than turning one panic into a cascade of them across every listener.
+    pub fn lock_runtime(&self) -> std::sync::MutexGuard<'_, NetworkRuntime> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PeerInfo {
@@ -292,7 +304,7 @@ fn pick_local_ip(preferred_ip: &str) -> String {
 }
 
 pub fn initialize_state(state: &NetworkingState) {
-    let mut guard = state.inner.lock().expect("network state poisoned");
+    let mut guard = state.lock_runtime();
     guard.hostname = hostname::get()
         .map(|v| v.to_string_lossy().to_string())
         .unwrap_or_else(|_| "offline".to_string());
@@ -301,7 +313,7 @@ pub fn initialize_state(state: &NetworkingState) {
 }
 
 pub fn set_display_name(state: &NetworkingState, name: String) {
-    let mut guard = state.inner.lock().expect("network state poisoned");
+    let mut guard = state.lock_runtime();
     let fallback = guard.hostname.clone();
     guard.display_name = if name.trim().is_empty() {
         fallback
@@ -311,7 +323,7 @@ pub fn set_display_name(state: &NetworkingState, name: String) {
 }
 
 pub fn set_local_peer_id(state: &NetworkingState, peer_id: String) {
-    let mut guard = state.inner.lock().expect("network state poisoned");
+    let mut guard = state.lock_runtime();
     guard.local_peer_id = peer_id.trim().to_string();
 }
 
@@ -357,7 +369,7 @@ fn upsert_peer_locked(runtime: &mut NetworkRuntime, ip: &str, peer_id: &str, nam
 }
 
 pub fn status_payload(state: &NetworkingState) -> NetworkStatusPayload {
-    let guard = state.inner.lock().expect("network state poisoned");
+    let guard = state.lock_runtime();
     NetworkStatusPayload {
         ip: guard.local_ip.clone(),
         hostname: guard.display_name.clone(),
@@ -393,7 +405,7 @@ pub fn status_payload(state: &NetworkingState) -> NetworkStatusPayload {
 
 fn emit_peers_snapshot(app: &AppHandle, state: &NetworkingState) {
     let peers = {
-        let guard = state.inner.lock().expect("network state poisoned");
+        let guard = state.lock_runtime();
         let mut values = guard.peers.values().cloned().collect::<Vec<_>>();
         values.sort_by(|a, b| a.name.cmp(&b.name));
         values
@@ -405,7 +417,7 @@ fn emit_peers_snapshot(app: &AppHandle, state: &NetworkingState) {
 
 pub fn set_preferred_ip(state: &NetworkingState, ip: String) -> NetworkStatusPayload {
     {
-        let mut guard = state.inner.lock().expect("network state poisoned");
+        let mut guard = state.lock_runtime();
         guard.preferred_ip = ip.trim().to_string();
         let next_ip = pick_local_ip(&guard.preferred_ip);
         if next_ip != guard.local_ip {
@@ -424,7 +436,7 @@ pub fn set_preferred_ip(state: &NetworkingState, ip: String) -> NetworkStatusPay
 
 pub fn set_discovery_node_ip(state: &NetworkingState, ip: String) -> NetworkStatusPayload {
     {
-        let mut guard = state.inner.lock().expect("network state poisoned");
+        let mut guard = state.lock_runtime();
         guard.discovery_node_ip = ip.trim().to_string();
         guard.diagnostics.last_node_connect_attempt_at = now_millis();
         if guard.discovery_node_ip.is_empty() {
@@ -449,7 +461,7 @@ pub fn emit_peer_resets(app: &AppHandle) {
 }
 
 pub fn peers_snapshot(state: &NetworkingState) -> Vec<PeerInfo> {
-    let guard = state.inner.lock().expect("network state poisoned");
+    let guard = state.lock_runtime();
     let mut values = guard.peers.values().cloned().collect::<Vec<_>>();
     values.sort_by(|a, b| a.name.cmp(&b.name));
     values
@@ -458,7 +470,7 @@ pub fn peers_snapshot(state: &NetworkingState) -> Vec<PeerInfo> {
 /// Look up a known peer by IP so an outbound ping/chat can be recorded with the
 /// recipient's stable identity and display name rather than a bare address.
 pub fn peer_by_ip(state: &NetworkingState, ip: &str) -> Option<PeerInfo> {
-    let guard = state.inner.lock().expect("network state poisoned");
+    let guard = state.lock_runtime();
     let normalized = normalize_ip(ip);
     guard
         .peers
@@ -468,7 +480,7 @@ pub fn peer_by_ip(state: &NetworkingState, ip: &str) -> Option<PeerInfo> {
 }
 
 fn touch_peer(state: &NetworkingState, ip: &str, peer_id: &str, name: &str) {
-    let mut guard = state.inner.lock().expect("network state poisoned");
+    let mut guard = state.lock_runtime();
     if is_local_interface_ip(ip, &guard.preferred_ip) {
         return;
     }
@@ -480,7 +492,7 @@ pub fn start_status_publisher(app: AppHandle, state: NetworkingState) {
         std::thread::sleep(Duration::from_secs(5));
         let now = now_millis();
         let changed = {
-            let mut guard = state.inner.lock().expect("network state poisoned");
+            let mut guard = state.lock_runtime();
             let before = guard.peers.len();
             guard
                 .peers
@@ -498,7 +510,7 @@ pub fn start_status_publisher(app: AppHandle, state: NetworkingState) {
 
 pub fn start_mdns_discovery(app: AppHandle, state: NetworkingState) {
     {
-        let mut guard = state.inner.lock().expect("network state poisoned");
+        let mut guard = state.lock_runtime();
         if guard.discovery_started {
             return;
         }
@@ -509,14 +521,14 @@ pub fn start_mdns_discovery(app: AppHandle, state: NetworkingState) {
         let mdns = match ServiceDaemon::new() {
             Ok(v) => v,
             Err(err) => {
-                let mut guard = state.inner.lock().expect("network state poisoned");
+                let mut guard = state.lock_runtime();
                 guard.diagnostics.last_connect_error = format!("mdns-daemon:{err}");
                 return;
             }
         };
 
         let (local_ip, host, instance_name, display_name, local_peer_id) = {
-            let guard = state.inner.lock().expect("network state poisoned");
+            let guard = state.lock_runtime();
             (
                 guard.local_ip.clone(),
                 normalize_host(&guard.hostname),
@@ -541,7 +553,7 @@ pub fn start_mdns_discovery(app: AppHandle, state: NetworkingState) {
 
         if let Ok(service) = service_info {
             if mdns.register(service).is_ok() {
-                let mut guard = state.inner.lock().expect("network state poisoned");
+                let mut guard = state.lock_runtime();
                 guard.diagnostics.mdns_announcements_sent += 1;
                 guard.diagnostics.last_announce_at = now_millis();
             }
@@ -549,13 +561,13 @@ pub fn start_mdns_discovery(app: AppHandle, state: NetworkingState) {
 
         let receiver = match mdns.browse(MDNS_SERVICE_TYPE) {
             Ok(rx) => {
-                let mut guard = state.inner.lock().expect("network state poisoned");
+                let mut guard = state.lock_runtime();
                 guard.diagnostics.mdns_queries_sent += 1;
                 guard.diagnostics.last_query_sent_at = now_millis();
                 rx
             }
             Err(err) => {
-                let mut guard = state.inner.lock().expect("network state poisoned");
+                let mut guard = state.lock_runtime();
                 guard.diagnostics.last_connect_error = format!("mdns-browse:{err}");
                 return;
             }
@@ -564,7 +576,7 @@ pub fn start_mdns_discovery(app: AppHandle, state: NetworkingState) {
         while let Ok(event) = receiver.recv() {
             match event {
                 ServiceEvent::SearchStarted(_) => {
-                    let mut guard = state.inner.lock().expect("network state poisoned");
+                    let mut guard = state.lock_runtime();
                     guard.diagnostics.mdns_queries_received += 1;
                     guard.diagnostics.last_mdns_query_at = now_millis();
                 }
@@ -580,7 +592,7 @@ pub fn start_mdns_discovery(app: AppHandle, state: NetworkingState) {
                     };
 
                     let should_emit = {
-                        let mut guard = state.inner.lock().expect("network state poisoned");
+                        let mut guard = state.lock_runtime();
                         if is_local_interface_ip(&ip, &guard.preferred_ip) {
                             continue;
                         }
@@ -607,7 +619,7 @@ pub fn start_mdns_discovery(app: AppHandle, state: NetworkingState) {
                     }
                 }
                 ServiceEvent::ServiceRemoved(_, fullname) => {
-                    let mut guard = state.inner.lock().expect("network state poisoned");
+                    let mut guard = state.lock_runtime();
                     let _ = guard.peer_fullnames.remove(&fullname);
                 }
                 _ => {}
@@ -623,7 +635,7 @@ pub fn start_ping_listener(app: AppHandle, state: NetworkingState) {
         let socket = match UdpSocket::bind(("0.0.0.0", PING_PORT)) {
             Ok(s) => s,
             Err(err) => {
-                let mut guard = state.inner.lock().expect("network state poisoned");
+                let mut guard = state.lock_runtime();
                 guard.diagnostics.last_connect_error = format!("ping-bind:{err}");
                 return;
             }
@@ -642,7 +654,7 @@ pub fn start_ping_listener(app: AppHandle, state: NetworkingState) {
             let from_ip = normalize_ip(&from_addr.ip().to_string());
 
             {
-                let mut guard = state.inner.lock().expect("network state poisoned");
+                let mut guard = state.lock_runtime();
                 if !is_local_interface_ip(&from_ip, &guard.preferred_ip) {
                     upsert_peer_locked(&mut guard, &from_ip, &payload.from_peer_id, &payload.from);
                 }
@@ -703,7 +715,7 @@ pub fn start_legacy_ping_listener(app: AppHandle, state: NetworkingState) {
         {
             Ok(rt) => rt,
             Err(err) => {
-                let mut guard = state.inner.lock().expect("network state poisoned");
+                let mut guard = state.lock_runtime();
                 guard.diagnostics.last_connect_error = format!("legacy-ping-rt:{err}");
                 return;
             }
@@ -733,7 +745,7 @@ pub fn start_legacy_ping_listener(app: AppHandle, state: NetworkingState) {
 
                             let inferred_ip = {
                                 let guard =
-                                    state_for_emit.inner.lock().expect("network state poisoned");
+                                    state_for_emit.lock_runtime();
                                 guard
                                     .peers
                                     .values()
@@ -754,7 +766,7 @@ pub fn start_legacy_ping_listener(app: AppHandle, state: NetworkingState) {
 
                             {
                                 let mut guard =
-                                    state_for_emit.inner.lock().expect("network state poisoned");
+                                    state_for_emit.lock_runtime();
                                 if !is_local_interface_ip(&from_ip, &guard.preferred_ip) {
                                     upsert_peer_locked(&mut guard, &from_ip, "", &from_name);
                                 }
@@ -782,14 +794,14 @@ pub fn start_legacy_ping_listener(app: AppHandle, state: NetworkingState) {
             let listener = match tokio::net::TcpListener::bind(("0.0.0.0", PING_PORT)).await {
                 Ok(v) => v,
                 Err(err) => {
-                    let mut guard = state.inner.lock().expect("network state poisoned");
+                    let mut guard = state.lock_runtime();
                     guard.diagnostics.last_connect_error = format!("legacy-ping-bind:{err}");
                     return;
                 }
             };
 
             if let Err(err) = axum::serve(listener, app_router).await {
-                let mut guard = state.inner.lock().expect("network state poisoned");
+                let mut guard = state.lock_runtime();
                 guard.diagnostics.last_connect_error = format!("legacy-ping-serve:{err}");
             }
         });
@@ -801,7 +813,7 @@ pub fn start_chat_presence_listener(state: NetworkingState) {
         let listener = match TcpListener::bind(("0.0.0.0", CHAT_PORT)) {
             Ok(v) => v,
             Err(err) => {
-                let mut guard = state.inner.lock().expect("network state poisoned");
+                let mut guard = state.lock_runtime();
                 guard.diagnostics.last_connect_error = format!("chat-presence-bind:{err}");
                 return;
             }
@@ -819,7 +831,7 @@ pub fn start_chat_listener(app: AppHandle, state: NetworkingState) {
         let socket = match UdpSocket::bind(("0.0.0.0", CHAT_PORT)) {
             Ok(s) => s,
             Err(err) => {
-                let mut guard = state.inner.lock().expect("network state poisoned");
+                let mut guard = state.lock_runtime();
                 guard.diagnostics.last_connect_error = format!("chat-bind:{err}");
                 return;
             }
@@ -838,7 +850,7 @@ pub fn start_chat_listener(app: AppHandle, state: NetworkingState) {
             let source_ip = normalize_ip(&from_addr.ip().to_string());
 
             {
-                let guard = state.inner.lock().expect("network state poisoned");
+                let guard = state.lock_runtime();
                 if is_local_interface_ip(&source_ip, &guard.preferred_ip) {
                     continue;
                 }
@@ -866,7 +878,7 @@ pub fn start_chat_listener(app: AppHandle, state: NetworkingState) {
 
             if payload.kind == "private" {
                 let should_accept = {
-                    let guard = state.inner.lock().expect("network state poisoned");
+                    let guard = state.lock_runtime();
                     payload.to_ip.trim().is_empty()
                         || is_local_interface_ip(&payload.to_ip, &guard.preferred_ip)
                 };
@@ -908,7 +920,7 @@ pub fn send_ping(
     shape: String,
 ) -> Result<PingPayload, String> {
     let (from_name, from_ip, from_peer_id) = {
-        let guard = state.inner.lock().expect("network state poisoned");
+        let guard = state.lock_runtime();
         (
             guard.display_name.clone(),
             guard.local_ip.clone(),
@@ -945,7 +957,7 @@ pub fn send_ping(
 
 pub fn send_team_chat(state: &NetworkingState, message: String) -> Result<ChatPayload, String> {
     let (from_name, from_ip, from_peer_id, peer_ips) = {
-        let guard = state.inner.lock().expect("network state poisoned");
+        let guard = state.lock_runtime();
         let ips = guard
             .peers
             .keys()
@@ -986,7 +998,7 @@ pub fn send_private_chat(
     message: String,
 ) -> Result<ChatPayload, String> {
     let (from_name, from_ip, from_peer_id) = {
-        let guard = state.inner.lock().expect("network state poisoned");
+        let guard = state.lock_runtime();
         (
             guard.display_name.clone(),
             guard.local_ip.clone(),
@@ -1019,7 +1031,7 @@ pub fn send_private_chat(
 /// instead of "delivered", never blocks anything.
 fn send_ack(state: &NetworkingState, target_ip: &str, message_id: &str) {
     let (from_name, from_ip, from_peer_id) = {
-        let guard = state.inner.lock().expect("network state poisoned");
+        let guard = state.lock_runtime();
         (
             guard.display_name.clone(),
             guard.local_ip.clone(),

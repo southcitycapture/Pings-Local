@@ -41,7 +41,7 @@ fn get_network_interfaces(
     state: State<'_, NetworkingState>,
 ) -> Vec<networking::NetworkInterfaceInfo> {
     let preferred_ip = {
-        let guard = state.inner.lock().expect("network state poisoned");
+        let guard = state.lock_runtime();
         guard.preferred_ip.clone()
     };
     network_interfaces(&preferred_ip)

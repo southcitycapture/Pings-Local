@@ -125,8 +125,13 @@ Landed and compile-verified (`cargo check` clean, `cargo test` green, frontend b
 - **Persistent history (SQLite).** New `store.rs` (rusqlite, WAL) records every ping and chat, in and out, and backs `get_history`/`clear_history` — the v2 commands that existed but were wired to a file nothing ever wrote. Activity now survives restarts; unit tests cover ordering, limit, and clear.
 - **Delivery states (acks).** Every private message carries a generated id. The recipient's backend sends an `ack` packet back on the chat port; the sender's listener emits a `chat-ack` event, and the DM window moves the message from **✓ sent** to **✓✓ delivered**. Acks are best-effort (a lost ack just leaves "sent"), never recorded as history, and never loop. This replaces v2's fire-and-forget UDP with real, visible delivery confidence.
 - **Port-scanner retired.** The automatic subnet probe is gone — the 24-thread TCP sweep of all 254 addresses that treated any open port 43211 as a Pings peer (inventing phantom peers and scanning the whole network on a timer). Discovery is now mDNS plus the ping/chat listeners populating peers on contact. Its dead diagnostics fields and now-unused imports were removed with it. (Manual "Add by IP" remains a future escape hatch for mDNS-blocked networks.)
+- **Panic-safe locking.** Every one of the ~36 `state.inner.lock().expect("network state poisoned")` sites — the review's "one panic while holding the lock cascades into panics everywhere" — now goes through `lock_runtime()`, which recovers from a poisoned mutex (`into_inner()`) instead of re-panicking. A single thread hiccup can no longer take down every listener; the networking layer is panic-free in steady state.
 
-Still to do in v3.0: the single-runtime service refactor (channels instead of `Arc<Mutex<Everything>>`).
+### On the single-runtime refactor — descoped, deliberately
+
+The plan originally called for rewriting networking onto a single tokio runtime with `mpsc`-channel actor services. **Recommendation: don't, at least not now.** The concrete reliability problem it was meant to solve (cascade panics) is fixed directly by `lock_runtime()`; the rest is stylistic. The current threads-plus-one-recovering-mutex design is simple, has no lock nesting (so no deadlock risk), and — as of the two-machine test — is validated working on real hardware including cross-version (v3 ↔ v2). A big-bang concurrency rewrite of working, validated networking code trades real regression risk (dropped events, ordering, deadlocks) for polish. If we ever add many more message types or need backpressure, revisit it then; today v3.0's internals are solid.
+
+**v3.0 core is complete.**
 
 ### v3.1 — Shell (the redesign lands)
 
