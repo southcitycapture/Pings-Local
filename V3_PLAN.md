@@ -124,8 +124,9 @@ Landed and compile-verified (`cargo check` clean, `cargo test` green, frontend b
 - **Double ping delivery killed.** The frontend now sends the native UDP ping once, and only falls back to the legacy socket.io bridge when the target is *not* a known v3 peer (i.e. has no `peerId`) — so two v3 peers get exactly one overlay, one sound, one feed entry, while v1 Electron peers stay reachable.
 - **Persistent history (SQLite).** New `store.rs` (rusqlite, WAL) records every ping and chat, in and out, and backs `get_history`/`clear_history` — the v2 commands that existed but were wired to a file nothing ever wrote. Activity now survives restarts; unit tests cover ordering, limit, and clear.
 - **Delivery states (acks).** Every private message carries a generated id. The recipient's backend sends an `ack` packet back on the chat port; the sender's listener emits a `chat-ack` event, and the DM window moves the message from **✓ sent** to **✓✓ delivered**. Acks are best-effort (a lost ack just leaves "sent"), never recorded as history, and never loop. This replaces v2's fire-and-forget UDP with real, visible delivery confidence.
+- **Port-scanner retired.** The automatic subnet probe is gone — the 24-thread TCP sweep of all 254 addresses that treated any open port 43211 as a Pings peer (inventing phantom peers and scanning the whole network on a timer). Discovery is now mDNS plus the ping/chat listeners populating peers on contact. Its dead diagnostics fields and now-unused imports were removed with it. (Manual "Add by IP" remains a future escape hatch for mDNS-blocked networks.)
 
-Still to do in v3.0: the single-runtime service refactor (channels instead of `Arc<Mutex<Everything>>`) and retiring the subnet port-scanner.
+Still to do in v3.0: the single-runtime service refactor (channels instead of `Arc<Mutex<Everything>>`).
 
 ### v3.1 — Shell (the redesign lands)
 

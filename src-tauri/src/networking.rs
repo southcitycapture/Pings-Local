@@ -3,7 +3,7 @@ use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use serde::{Deserialize, Serialize};
 use socketioxide::{extract::Data, SocketIo};
 use std::collections::{HashMap, HashSet};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket};
+use std::net::{Ipv4Addr, TcpListener, UdpSocket};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
@@ -12,7 +12,6 @@ const MDNS_SERVICE_TYPE: &str = "_pings._tcp.local.";
 const PING_PORT: u16 = 43210;
 const CHAT_PORT: u16 = 43211;
 const PEER_STALE_MS: u64 = 900_000;
-const SUBNET_PROBE_INTERVAL_MS: u64 = 15_000;
 
 #[derive(Clone, Default)]
 pub struct NetworkingState {
@@ -109,8 +108,6 @@ pub struct NetworkDiagnostics {
     pub last_mdns_query_at: u64,
     pub last_announce_at: u64,
     pub last_query_sent_at: u64,
-    pub last_subnet_probe_at: u64,
-    pub last_subnet_probe_hits: u32,
     pub last_node_connect_attempt_at: u64,
     pub last_node_connect_success_at: u64,
     pub last_peer_list_sync_at: u64,
@@ -119,7 +116,6 @@ pub struct NetworkDiagnostics {
     pub last_connect_attempt_ip: String,
     pub last_connect_success_ip: String,
     pub last_connect_error: String,
-    pub last_subnet_hit_ip: String,
 }
 
 #[derive(Default)]
@@ -133,7 +129,6 @@ pub struct NetworkRuntime {
     pub peers: HashMap<String, PeerInfo>,
     pub peer_fullnames: HashMap<String, String>,
     pub discovery_started: bool,
-    pub is_subnet_probe_running: bool,
     pub diagnostics: RuntimeDiagnostics,
 }
 
@@ -150,8 +145,6 @@ pub struct RuntimeDiagnostics {
     pub last_mdns_query_at: u64,
     pub last_announce_at: u64,
     pub last_query_sent_at: u64,
-    pub last_subnet_probe_at: u64,
-    pub last_subnet_probe_hits: u32,
     pub last_node_connect_attempt_at: u64,
     pub last_node_connect_success_at: u64,
     pub last_peer_list_sync_at: u64,
@@ -160,7 +153,6 @@ pub struct RuntimeDiagnostics {
     pub last_connect_attempt_ip: String,
     pub last_connect_success_ip: String,
     pub last_connect_error: String,
-    pub last_subnet_hit_ip: String,
 }
 
 fn now_millis() -> u64 {
@@ -387,8 +379,6 @@ pub fn status_payload(state: &NetworkingState) -> NetworkStatusPayload {
             last_mdns_query_at: guard.diagnostics.last_mdns_query_at,
             last_announce_at: guard.diagnostics.last_announce_at,
             last_query_sent_at: guard.diagnostics.last_query_sent_at,
-            last_subnet_probe_at: guard.diagnostics.last_subnet_probe_at,
-            last_subnet_probe_hits: guard.diagnostics.last_subnet_probe_hits,
             last_node_connect_attempt_at: guard.diagnostics.last_node_connect_attempt_at,
             last_node_connect_success_at: guard.diagnostics.last_node_connect_success_at,
             last_peer_list_sync_at: guard.diagnostics.last_peer_list_sync_at,
@@ -397,7 +387,6 @@ pub fn status_payload(state: &NetworkingState) -> NetworkStatusPayload {
             last_connect_attempt_ip: guard.diagnostics.last_connect_attempt_ip.clone(),
             last_connect_success_ip: guard.diagnostics.last_connect_success_ip.clone(),
             last_connect_error: guard.diagnostics.last_connect_error.clone(),
-            last_subnet_hit_ip: guard.diagnostics.last_subnet_hit_ip.clone(),
         },
     }
 }
@@ -503,114 +492,8 @@ pub fn start_status_publisher(app: AppHandle, state: NetworkingState) {
         if changed {
             emit_peers_snapshot(&app, &state);
         }
-        maybe_probe_subnet(app.clone(), state.clone());
         emit_network_status(&app, &state);
     });
-}
-
-fn maybe_probe_subnet(app: AppHandle, state: NetworkingState) {
-    let (should_probe, local_ip) = {
-        let mut guard = state.inner.lock().expect("network state poisoned");
-        if guard.is_subnet_probe_running {
-            return;
-        }
-        if !guard.peers.is_empty() {
-            return;
-        }
-        if guard.local_ip == "127.0.0.1" {
-            return;
-        }
-        let now = now_millis();
-        if now.saturating_sub(guard.diagnostics.last_subnet_probe_at) < SUBNET_PROBE_INTERVAL_MS {
-            return;
-        }
-        guard.is_subnet_probe_running = true;
-        guard.diagnostics.last_subnet_probe_at = now;
-        (true, guard.local_ip.clone())
-    };
-
-    if !should_probe {
-        return;
-    }
-
-    std::thread::spawn(move || {
-        let hits = probe_local_subnet(&local_ip, &state);
-        {
-            let mut guard = state.inner.lock().expect("network state poisoned");
-            guard.is_subnet_probe_running = false;
-            guard.diagnostics.last_subnet_probe_hits = hits;
-            guard.diagnostics.peers_count = guard.peers.len();
-        }
-        if hits > 0 {
-            emit_peers_snapshot(&app, &state);
-        }
-        emit_network_status(&app, &state);
-    });
-}
-
-fn probe_local_subnet(local_ip: &str, state: &NetworkingState) -> u32 {
-    let Ok(addr) = local_ip.parse::<Ipv4Addr>() else {
-        return 0;
-    };
-    let octets = addr.octets();
-    let prefix = format!("{}.{}.{}", octets[0], octets[1], octets[2]);
-    let self_octet = octets[3];
-
-    let mut candidates: Vec<String> = (1..=254)
-        .filter(|v| *v != self_octet)
-        .map(|v| format!("{prefix}.{v}"))
-        .collect();
-
-    let queue = Arc::new(Mutex::new(Vec::from_iter(candidates.drain(..))));
-    let hits = Arc::new(Mutex::new(0u32));
-    let workers = 24usize;
-    let mut handles = Vec::new();
-
-    for _ in 0..workers {
-        let queue_ref = queue.clone();
-        let hits_ref = hits.clone();
-        let state_ref = state.clone();
-        handles.push(std::thread::spawn(move || loop {
-            let next_ip = {
-                let mut guard = queue_ref.lock().expect("probe queue poisoned");
-                guard.pop()
-            };
-            let Some(ip) = next_ip else {
-                break;
-            };
-
-            if !is_chat_port_open(&ip) {
-                continue;
-            }
-
-            {
-                let mut guard = state_ref.inner.lock().expect("network state poisoned");
-                if is_local_interface_ip(&ip, &guard.preferred_ip) {
-                    continue;
-                }
-                upsert_peer_locked(&mut guard, &ip, "", "");
-                guard.diagnostics.last_subnet_hit_ip = ip;
-            }
-
-            let mut hits_guard = hits_ref.lock().expect("hits lock poisoned");
-            *hits_guard += 1;
-        }));
-    }
-
-    for handle in handles {
-        let _ = handle.join();
-    }
-
-    let hits_guard = hits.lock().expect("hits lock poisoned");
-    *hits_guard
-}
-
-fn is_chat_port_open(ip: &str) -> bool {
-    let Ok(parsed) = ip.parse::<Ipv4Addr>() else {
-        return false;
-    };
-    let addr = SocketAddr::new(IpAddr::V4(parsed), CHAT_PORT);
-    TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok()
 }
 
 pub fn start_mdns_discovery(app: AppHandle, state: NetworkingState) {
