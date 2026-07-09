@@ -44,6 +44,19 @@
       </footer>
     </main>
 
+    <!-- First-run onboarding -->
+    <div class="onboard" id="onboard" hidden>
+      <div class="onboard-card">
+        <div class="onboard-mark" id="onboard-preview"><span class="onboard-ping"></span>Pings</div>
+        <h1>Welcome to Pings</h1>
+        <p>A tap on the shoulder for everyone on your network. First, what should people call you?</p>
+        <label class="onboard-label" for="onboard-name">Your name</label>
+        <input id="onboard-name" type="text" placeholder="e.g. Zach" autocomplete="off" />
+        <button class="onboard-try" id="onboard-try">Preview a ping ▸</button>
+        <button class="onboard-done" id="onboard-done">Start using Pings</button>
+      </div>
+    </div>
+
     <!-- Slide-up drawer: Activity timeline + Team chat -->
     <div class="drawer-scrim" id="drawer-scrim" hidden></div>
     <section class="drawer" id="drawer" hidden aria-hidden="true">

@@ -11,6 +11,8 @@ import {
   sendTeamChat,
   getSettings,
   getProfile,
+  setProfile,
+  updateSetting,
   getHistory,
   openOptionsWindow,
   openDirectChatWindow,
@@ -73,6 +75,11 @@ function cacheElements() {
   el.teamMessages = document.getElementById("team-messages");
   el.teamInput = document.getElementById("team-input");
   el.teamSend = document.getElementById("team-send");
+  el.onboard = document.getElementById("onboard");
+  el.onboardName = document.getElementById("onboard-name");
+  el.onboardTry = document.getElementById("onboard-try");
+  el.onboardDone = document.getElementById("onboard-done");
+  el.onboardPreview = document.getElementById("onboard-preview");
 }
 
 // ---------------------------------------------------------------- helpers
@@ -504,9 +511,40 @@ function closeDrawer() {
   }, 210);
 }
 
+// ---------------------------------------------------------------- onboarding
+
+function maybeShowOnboarding() {
+  if (settings.hasCompletedOnboarding) return;
+  el.onboard.hidden = false;
+  el.onboardName.value = profile.displayName || status?.hostname || "";
+  setTimeout(() => el.onboardName.focus(), 60);
+}
+
+async function finishOnboarding() {
+  const name = (el.onboardName.value || "").trim();
+  if (name) profile = await setProfile({ ...profile, displayName: name });
+  const next = await updateSetting("hasCompletedOnboarding", true);
+  settings = { ...settings, ...(next || {}) };
+  el.onboard.hidden = true;
+  renderSelf();
+}
+
+function previewPing() {
+  el.onboardPreview.classList.remove("flash");
+  void el.onboardPreview.offsetWidth; // restart the animation
+  el.onboardPreview.classList.add("flash");
+  playSound(settings.sound || "light");
+}
+
 // ---------------------------------------------------------------- wiring
 
 function wireStaticControls() {
+  el.onboardTry.addEventListener("click", previewPing);
+  el.onboardDone.addEventListener("click", () => void finishOnboarding());
+  el.onboardName.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") void finishOnboarding();
+  });
+
   el.openOptions.addEventListener("click", () => void openOptionsWindow());
   el.openTeam.addEventListener("click", () => openDrawer("team"));
   el.openActivity.addEventListener("click", () => openDrawer("activity"));
@@ -636,6 +674,7 @@ async function boot() {
     status = loadedStatus || null;
     applyTheme(settings);
     renderSelf();
+    maybeShowOnboarding();
 
     const [loadedPeers, loadedHistory] = await Promise.all([getPeers(), getHistory(200)]);
     peers = Array.isArray(loadedPeers) ? loadedPeers : [];

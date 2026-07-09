@@ -574,8 +574,141 @@ button {
   filter: brightness(1.05);
 }
 
+/* ---------------------------------------------------------------- onboarding */
+
+.onboard {
+  position: fixed;
+  inset: 0;
+  background: var(--ground);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  z-index: 10;
+}
+
+.onboard[hidden] {
+  display: none;
+}
+
+.onboard-card {
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: center;
+}
+
+.onboard-mark {
+  position: relative;
+  height: 92px;
+  border-radius: var(--radius-container);
+  background: var(--inset);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.onboard-mark.flash {
+  animation: onboard-ping 1s ease-out;
+}
+
+.onboard-ping {
+  display: none;
+}
+
+@keyframes onboard-ping {
+  0% {
+    box-shadow: inset 0 0 0 0 transparent;
+  }
+  25% {
+    box-shadow:
+      inset 0 0 0 4px var(--accent),
+      inset 0 0 24px color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+  100% {
+    box-shadow: inset 0 0 0 0 transparent;
+  }
+}
+
+.onboard-card h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.onboard-card p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.onboard-label {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+.onboard-card input {
+  border: 1px solid var(--line);
+  background: var(--inset);
+  border-radius: var(--radius-control);
+  padding: 9px 11px;
+  font-size: 14px;
+  color: var(--ink);
+  font-family: inherit;
+}
+
+.onboard-card input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.onboard-try {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: var(--radius-control);
+  padding: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.onboard-try:hover {
+  background: var(--inset);
+}
+
+.onboard-done {
+  border: none;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-radius: var(--radius-control);
+  padding: 10px;
+  font-size: 14px;
+  font-weight: 650;
+  margin-top: 2px;
+}
+
+.onboard-done:hover {
+  filter: brightness(1.05);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .drawer {
     transition: none;
+  }
+  .onboard-mark.flash {
+    animation: none;
   }
 }

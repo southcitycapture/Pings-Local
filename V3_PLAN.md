@@ -136,8 +136,9 @@ The main window is now the buddy list from the mockup, built on the shared front
 - **⌘K finder.** The hint bar is a real filter: ⌘K focuses it, typing narrows the list, Enter pings the top match. (The global-shortcut / standalone palette version is still v3.2.)
 - **Activity + Team drawer.** A slide-up drawer, opened from the footer, with an Activity timeline (merged ping/chat history from SQLite, grouped by day) and a Team chat tab — both seeded from the persisted store, so they survive restarts.
 - **DM window** restyled onto the same tokens.
+- **First-run onboarding.** A launch card asks your name and lets you preview the ping effect (a glowing border, a taste of the overlay) before landing on the buddy list. This finally activates the `hasCompletedOnboarding` setting v2 stored but never used.
 - Main window resized to buddy-list dimensions (400×640).
 
-Verified by rendering the built UI headless (Chromium) with a mocked bridge and screenshotting light + dark, resting/hover, and both drawer tabs. That pass caught and fixed a real bug (the drawer's tab pills had no click handler).
+Verified by rendering the built UI headless (Chromium) with a mocked bridge and screenshotting light + dark, resting/hover, both drawer tabs, and the full onboarding flow through dismissal. That pass caught and fixed a real bug (the drawer's tab pills had no click handler).
 
-Still to do in v3.1: onboarding (first-run name + effect preview), and moving the remaining settings surface fully into one window.
+Still to do in v3.1: moving the remaining settings surface fully into one window.
