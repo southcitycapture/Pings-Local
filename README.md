@@ -87,22 +87,14 @@ Linux and Windows are a planned future port.
 
 ## Install it on a machine
 
-**Download the app (once a release is published).** Grab the latest `.dmg` from
-[**Releases**](https://github.com/southcitycapture/Pings-Local/releases/latest)
-and drag **Pings** to Applications — or from a terminal:
+Pings isn't code-signed with an Apple Developer ID yet, so the cleanest way to
+put it on a Mac today is to **clone and build it** — a locally built app runs
+straight away, without the Gatekeeper prompt a downloaded unsigned `.dmg` would
+trigger.
 
-```bash
-gh release download --repo southcitycapture/Pings-Local --pattern "*.dmg"
-open Pings_*.dmg
-```
+### Clone & build (current method)
 
-Until Apple notarization is wired up, macOS Gatekeeper warns on first launch:
-**right-click `Pings.app` → Open** once, then it opens normally after that.
-(Cutting that first release is a one-time setup — see
-[Building a release](#building-a-release).)
-
-**Or build it yourself right now.** Needs the Xcode command-line tools,
-[Rust](https://rustup.rs), and Node 18+:
+Needs the Xcode command-line tools, [Rust](https://rustup.rs), and Node 18+:
 
 ```bash
 # one-time toolchain (skip whatever you already have)
@@ -110,7 +102,7 @@ xcode-select --install
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 brew install node
 
-# build + install
+# pull, build, install
 git clone https://github.com/southcitycapture/Pings-Local.git
 cd Pings-Local
 npm install
@@ -119,8 +111,18 @@ open src-tauri/target/release/bundle/dmg/     # drag Pings.app to Applications
 ```
 
 The `--config` flag skips the signed-updater artifacts (which need the release
-signing key) — fine for a personal install; drop it when building a real
-release. To run it without installing, use `npm run tauri dev` (below).
+signing key), so no key is required for a local install. To just run it without
+installing, use `npm run tauri dev`.
+
+### Download a release (once one is published)
+
+When a signed release is cut (see [Building a release](#building-a-release)),
+installing becomes a plain download — no toolchain needed:
+
+```bash
+gh release download --repo southcitycapture/Pings-Local --pattern "*.dmg"
+open Pings_*.dmg     # right-click → Open on first launch until notarized
+```
 
 ## Getting started (development)
 
