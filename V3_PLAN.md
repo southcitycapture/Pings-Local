@@ -123,8 +123,9 @@ Landed and compile-verified (`cargo check` clean, `cargo test` green, frontend b
 - **Stable peer identity.** A UUID `peerId` is generated once and persisted in `profile.json`, advertised in the mDNS TXT record, and carried on every ping/chat payload. Peers now hold both an IP (routing) and a `peerId` (identity); a new `upsert_peer_locked` helper preserves identity/color/name across updates so a bare legacy ping never clobbers what mDNS learned. The main window dedupes peers by `peerId`, so a peer that changes IP collapses to one row instead of two.
 - **Double ping delivery killed.** The frontend now sends the native UDP ping once, and only falls back to the legacy socket.io bridge when the target is *not* a known v3 peer (i.e. has no `peerId`) — so two v3 peers get exactly one overlay, one sound, one feed entry, while v1 Electron peers stay reachable.
 - **Persistent history (SQLite).** New `store.rs` (rusqlite, WAL) records every ping and chat, in and out, and backs `get_history`/`clear_history` — the v2 commands that existed but were wired to a file nothing ever wrote. Activity now survives restarts; unit tests cover ordering, limit, and clear.
+- **Delivery states (acks).** Every private message carries a generated id. The recipient's backend sends an `ack` packet back on the chat port; the sender's listener emits a `chat-ack` event, and the DM window moves the message from **✓ sent** to **✓✓ delivered**. Acks are best-effort (a lost ack just leaves "sent"), never recorded as history, and never loop. This replaces v2's fire-and-forget UDP with real, visible delivery confidence.
 
-Still to do in v3.0: the single-runtime service refactor (channels instead of `Arc<Mutex<Everything>>`), ack-based delivery states on the wire, and retiring the subnet port-scanner.
+Still to do in v3.0: the single-runtime service refactor (channels instead of `Arc<Mutex<Everything>>`) and retiring the subnet port-scanner.
 
 ### v3.1 — Shell (the redesign lands)
 

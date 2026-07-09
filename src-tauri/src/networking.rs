@@ -48,6 +48,11 @@ pub struct PingPayload {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatPayload {
+    /// Per-message id. Private messages carry one so the recipient can ack it
+    /// and the sender can move the message from "sent" to "delivered". Team
+    /// messages and pings leave it empty.
+    #[serde(default)]
+    pub id: String,
     pub kind: String,
     pub from: String,
     pub from_ip: String,
@@ -958,6 +963,21 @@ pub fn start_chat_listener(app: AppHandle, state: NetworkingState) {
 
             payload.from_ip = source_ip.clone();
             touch_peer(&state, &source_ip, &payload.from_peer_id, &payload.from);
+
+            // An ack confirms a private message we sent was delivered. Tell the
+            // frontend and stop — acks are not messages and are not recorded.
+            if payload.kind == "ack" {
+                let _ = app.emit(
+                    "chat-ack",
+                    serde_json::json!({
+                        "id": payload.id,
+                        "fromIp": source_ip,
+                        "fromPeerId": payload.from_peer_id,
+                    }),
+                );
+                continue;
+            }
+
             emit_peers_snapshot(&app, &state);
             emit_network_status(&app, &state);
 
@@ -984,6 +1004,9 @@ pub fn start_chat_listener(app: AppHandle, state: NetworkingState) {
                     );
                 }
                 record_incoming_chat(&app, "chat", &payload);
+                if !payload.id.trim().is_empty() {
+                    send_ack(&state, &source_ip, &payload.id);
+                }
                 let _ = app.emit("incoming-private-chat", payload);
                 continue;
             }
@@ -1055,6 +1078,7 @@ pub fn send_team_chat(state: &NetworkingState, message: String) -> Result<ChatPa
     };
 
     let payload = ChatPayload {
+        id: String::new(),
         kind: "team".to_string(),
         from: from_name,
         from_ip,
@@ -1088,6 +1112,7 @@ pub fn send_private_chat(
     };
 
     let payload = ChatPayload {
+        id: uuid::Uuid::new_v4().to_string(),
         kind: "private".to_string(),
         from: from_name,
         from_ip,
@@ -1104,4 +1129,36 @@ pub fn send_private_chat(
         .map_err(|e| format!("private-chat-send:{e}"))?;
 
     Ok(payload)
+}
+
+/// Send a delivery acknowledgement for a received private message back to its
+/// sender. Best-effort: a lost ack just leaves the sender showing "sent"
+/// instead of "delivered", never blocks anything.
+fn send_ack(state: &NetworkingState, target_ip: &str, message_id: &str) {
+    let (from_name, from_ip, from_peer_id) = {
+        let guard = state.inner.lock().expect("network state poisoned");
+        (
+            guard.display_name.clone(),
+            guard.local_ip.clone(),
+            guard.local_peer_id.clone(),
+        )
+    };
+
+    let payload = ChatPayload {
+        id: message_id.to_string(),
+        kind: "ack".to_string(),
+        from: from_name,
+        from_ip,
+        from_peer_id,
+        to_ip: target_ip.to_string(),
+        message: String::new(),
+        timestamp: now_millis(),
+    };
+
+    let Ok(socket) = UdpSocket::bind(("0.0.0.0", 0)) else {
+        return;
+    };
+    if let Ok(bytes) = serde_json::to_vec(&payload) {
+        let _ = socket.send_to(&bytes, (target_ip, CHAT_PORT));
+    }
 }

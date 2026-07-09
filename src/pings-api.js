@@ -105,6 +105,10 @@ export async function onIncomingPrivateChatWindow(callback) {
   return listen("incoming-private-chat-window", (event) => callback(event.payload));
 }
 
+export async function onIncomingChatAck(callback) {
+  return listen("chat-ack", (event) => callback(event.payload));
+}
+
 export async function onSettingsUpdated(callback) {
   return listen("settings-updated", (event) => callback(event.payload));
 }
