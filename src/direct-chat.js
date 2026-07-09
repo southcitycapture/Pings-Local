@@ -21,8 +21,7 @@ let lastSettingsFetch = 0;
 let audioContext = null;
 
 function applyTheme(settings = {}) {
-  const isDark = Boolean(settings?.darkMode);
-  document.body.classList.toggle("dark", isDark);
+  document.documentElement.setAttribute("data-theme", settings?.darkMode ? "dark" : "light");
 }
 
 function getCurrentLabel() {

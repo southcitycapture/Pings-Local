@@ -1,11 +1,6 @@
 import {
-  health,
-  migrationModules,
-  getNetworkInterfaces,
-  getNetworkStatus,
   getPeers,
-  setPreferredIp,
-  setDiscoveryNodeIp,
+  getNetworkStatus,
   onNetworkStatus,
   onPeersUpdated,
   onIncomingPing,
@@ -15,494 +10,335 @@ import {
   sendPing,
   sendTeamChat,
   getSettings,
-  updateSetting,
   getProfile,
-  setProfile,
+  getHistory,
   openOptionsWindow,
   openDirectChatWindow,
 } from "./pings-api.js";
 import { io } from "socket.io-client";
+import {
+  normalizeIp,
+  escapeHtml,
+  formatAgo,
+  initials,
+  peerKey,
+  displayName,
+  presenceState,
+} from "./core/format.js";
+import { playSound } from "./core/sound.js";
+
+// ---------------------------------------------------------------- state
 
 let peers = [];
-let pingFeed = [];
-let latestNetworkStatus = null;
-let audioContext = null;
-let teamMessages = [];
-let activeAliasEditIp = "";
-let currentSettings = {
+let settings = {
   customMessage: "",
   sound: "light",
   pingShape: "circle",
-  peerAliases: {},
   chatSoundsEnabled: true,
   chatSendSound: "tap",
   chatReceiveSound: "bubble",
   darkMode: false,
 };
+let profile = {};
+let status = null;
+let historyAll = []; // oldest-first; the single history invariant
+let teamMessages = []; // oldest-first
 
-function applyTheme(settings = {}) {
-  document.body.classList.toggle("dark", Boolean(settings.darkMode));
+const unread = new Map(); // peerKey -> count
+const sentFlash = new Map(); // peerKey -> { state, timer }
+const rowEls = new Map(); // peerKey -> row refs
+
+let filterText = "";
+let drawerTab = "activity";
+
+// ---------------------------------------------------------------- elements
+
+const el = {};
+function cacheElements() {
+  el.selfAvatar = document.getElementById("self-avatar");
+  el.selfName = document.getElementById("self-name");
+  el.selfSub = document.getElementById("self-sub");
+  el.openOptions = document.getElementById("open-options");
+  el.finder = document.getElementById("finder-input");
+  el.countLabel = document.getElementById("peers-count-label");
+  el.peerList = document.getElementById("peer-list");
+  el.peerEmpty = document.getElementById("peer-empty");
+  el.pingsToday = document.getElementById("pings-today");
+  el.openTeam = document.getElementById("open-team");
+  el.openActivity = document.getElementById("open-activity");
+  el.scrim = document.getElementById("drawer-scrim");
+  el.drawer = document.getElementById("drawer");
+  el.closeDrawer = document.getElementById("close-drawer");
+  el.activityList = document.getElementById("activity-list");
+  el.teamMessages = document.getElementById("team-messages");
+  el.teamInput = document.getElementById("team-input");
+  el.teamSend = document.getElementById("team-send");
 }
 
-function getAudioContext() {
-  if (!audioContext) {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (Ctx) {
-      audioContext = new Ctx();
+// ---------------------------------------------------------------- helpers
+
+function applyTheme(next) {
+  document.documentElement.setAttribute("data-theme", next?.darkMode ? "dark" : "light");
+}
+
+function wireSound() {
+  const s = settings.sound || "light";
+  return s === "light" ? "chime" : s;
+}
+
+function avatarClass(key) {
+  let hash = 0;
+  for (const ch of key) hash = (ch.charCodeAt(0) + ((hash << 5) - hash)) | 0;
+  return `av-${(Math.abs(hash) % 6) + 1}`;
+}
+
+function isToday(ts) {
+  if (!ts) return false;
+  const d = new Date(ts);
+  const now = new Date();
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
+}
+
+function dedupePeers(list) {
+  const byKey = new Map();
+  for (const peer of Array.isArray(list) ? list : []) {
+    const key = peerKey(peer);
+    if (!key) continue;
+    const prev = byKey.get(key);
+    if (!prev || (peer?.lastSeen || 0) > (prev?.lastSeen || 0)) byKey.set(key, peer);
+  }
+  return [...byKey.values()];
+}
+
+function sortedFilteredPeers() {
+  const q = filterText.trim().toLowerCase();
+  let list = dedupePeers(peers);
+  if (q) {
+    list = list.filter(
+      (p) => displayName(p).toLowerCase().includes(q) || normalizeIp(p.ip).includes(q),
+    );
+  }
+  list.sort((a, b) => {
+    const ao = presenceState(a.lastSeen) === "online" ? 0 : 1;
+    const bo = presenceState(b.lastSeen) === "online" ? 0 : 1;
+    if (ao !== bo) return ao - bo;
+    return (b.lastSeen || 0) - (a.lastSeen || 0);
+  });
+  return list;
+}
+
+// ---------------------------------------------------------------- self
+
+function renderSelf() {
+  const name = profile.displayName || status?.hostname || "You";
+  el.selfName.innerHTML = `${escapeHtml(name)}<span class="dot online"></span>`;
+  el.selfAvatar.textContent = initials(name);
+  el.selfSub.textContent = `${status?.ip || "n/a"} · online`;
+}
+
+// ---------------------------------------------------------------- peer rows
+
+function createRow(peer, key) {
+  const row = { peer };
+
+  const node = document.createElement("div");
+  node.className = "row";
+  node.setAttribute("role", "listitem");
+  node.dataset.key = key;
+  node.tabIndex = 0;
+
+  const avatar = document.createElement("span");
+  avatar.className = `avatar ${avatarClass(key)}`;
+
+  const who = document.createElement("div");
+  who.className = "who";
+  const name = document.createElement("div");
+  name.className = "name";
+  const nameText = document.createElement("span");
+  const dot = document.createElement("span");
+  dot.className = "dot";
+  name.append(nameText, dot);
+  const sub = document.createElement("div");
+  sub.className = "sub";
+  who.append(name, sub);
+
+  const end = document.createElement("div");
+  end.className = "row-end";
+  const statusSlot = document.createElement("span");
+  statusSlot.className = "status";
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  const msgBtn = document.createElement("button");
+  msgBtn.className = "btn-msg";
+  msgBtn.textContent = "Message";
+  const pingBtn = document.createElement("button");
+  pingBtn.className = "btn-ping";
+  pingBtn.textContent = "Ping";
+  actions.append(msgBtn, pingBtn);
+  end.append(statusSlot, actions);
+
+  node.append(avatar, who, end);
+
+  Object.assign(row, { node, avatar, nameText, dot, sub, statusSlot, msgBtn, pingBtn });
+
+  pingBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    void pingPeer(row);
+  });
+  msgBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    void messagePeer(row);
+  });
+  node.addEventListener("dblclick", () => void pingPeer(row));
+  node.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") void pingPeer(row);
+  });
+
+  return row;
+}
+
+function updateRowStatus(row, key) {
+  const flash = sentFlash.get(key)?.state;
+  const count = unread.get(key) || 0;
+  row.statusSlot.textContent = "";
+  if (flash === "sent") {
+    const c = document.createElement("span");
+    c.className = "sent-chip";
+    c.textContent = "Sent ✓";
+    row.statusSlot.append(c);
+  } else if (flash === "failed") {
+    const c = document.createElement("span");
+    c.className = "failed-chip";
+    c.textContent = "Failed";
+    row.statusSlot.append(c);
+  } else if (count > 0) {
+    const b = document.createElement("span");
+    b.className = "badge-unread";
+    b.textContent = String(count);
+    row.statusSlot.append(b);
+  }
+}
+
+function updateRow(row, peer, key) {
+  row.peer = peer;
+  const label = displayName(peer);
+  const online = presenceState(peer.lastSeen) === "online";
+  if (row.nameText.textContent !== label) row.nameText.textContent = label;
+  const dotClass = online ? "dot online" : "dot";
+  if (row.dot.className !== dotClass) row.dot.className = dotClass;
+  row.dot.title = online ? "online" : "away";
+  const sub = `${normalizeIp(peer.ip) || "n/a"} · ${online ? "online" : formatAgo(peer.lastSeen)}`;
+  if (row.sub.textContent !== sub) row.sub.textContent = sub;
+  const init = initials(label);
+  if (row.avatar.textContent !== init) row.avatar.textContent = init;
+  updateRowStatus(row, key);
+}
+
+function reconcileList() {
+  const list = sortedFilteredPeers();
+
+  if (!list.length) {
+    rowEls.forEach((row) => row.node.remove());
+    rowEls.clear();
+    el.peerEmpty.hidden = false;
+    el.peerEmpty.textContent = filterText
+      ? "No matches"
+      : "Waiting for people on your network…";
+    el.countLabel.textContent = filterText ? "No matches" : "On your network";
+    return;
+  }
+
+  el.peerEmpty.hidden = true;
+  const seen = new Set();
+  for (const peer of list) {
+    const key = peerKey(peer);
+    seen.add(key);
+    let row = rowEls.get(key);
+    if (!row) {
+      row = createRow(peer, key);
+      rowEls.set(key, row);
+    }
+    updateRow(row, peer, key);
+  }
+  for (const [key, row] of rowEls) {
+    if (!seen.has(key)) {
+      row.node.remove();
+      rowEls.delete(key);
     }
   }
-  return audioContext;
-}
-
-function playTone(freq = 800, type = "sine", duration = 0.12, gainValue = 0.24) {
-  const ctx = getAudioContext();
-  if (!ctx) return;
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  osc.type = type;
-  osc.frequency.value = freq;
-  gain.gain.value = 0;
-  osc.connect(gain);
-  gain.connect(ctx.destination);
-  const now = ctx.currentTime;
-  gain.gain.linearRampToValueAtTime(gainValue, now + 0.02);
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-  osc.start(now);
-  osc.stop(now + duration);
-}
-
-function playSound(rawSound) {
-  const sound = String(rawSound || "light").toLowerCase();
-  if (sound === "off") return;
-  if (sound === "light") {
-    playTone(980, "sine", 0.1, 0.14);
-    return;
+  // Re-order DOM to match sort (appendChild moves existing nodes, no rebuild).
+  for (const peer of list) {
+    const row = rowEls.get(peerKey(peer));
+    if (row) el.peerList.appendChild(row.node);
   }
-  if (sound === "bubble") {
-    playTone(720, "sine", 0.11, 0.18);
-    return;
-  }
-  if (sound === "tap") {
-    playTone(1350, "square", 0.05, 0.16);
-    return;
-  }
-  if (sound === "bell") {
-    playTone(620, "triangle", 0.22, 0.2);
-    return;
-  }
-  if (sound === "drop") {
-    playTone(340, "sine", 0.13, 0.2);
-    return;
-  }
-  playTone(1140, "sine", 0.14, 0.24);
+  el.countLabel.textContent = `On your network · ${list.length}`;
 }
 
-function maybePlayChatSound(kind) {
-  if (!currentSettings.chatSoundsEnabled) return;
-  if (kind === "send") {
-    playSound(currentSettings.chatSendSound || "tap");
-    return;
-  }
-  playSound(currentSettings.chatReceiveSound || "bubble");
+// ---------------------------------------------------------------- actions
+
+function flashStatus(key, state) {
+  const prev = sentFlash.get(key);
+  if (prev?.timer) clearTimeout(prev.timer);
+  const timer = setTimeout(() => {
+    sentFlash.delete(key);
+    const row = rowEls.get(key);
+    if (row) updateRowStatus(row, key);
+  }, 1600);
+  sentFlash.set(key, { state, timer });
+  const row = rowEls.get(key);
+  if (row) updateRowStatus(row, key);
 }
 
-function escapeHtml(text = "") {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-function normalizeIp(value) {
-  return String(value || "")
-    .replace("::ffff:", "")
-    .trim();
-}
-
-function getPeerAliases() {
-  const raw = currentSettings.peerAliases;
-  if (raw && typeof raw === "object") {
-    return raw;
-  }
-  return {};
-}
-
-function getPeerAlias(ip) {
-  const key = normalizeIp(ip);
-  if (!key) return "";
-  return String(getPeerAliases()[key] || "").trim();
-}
-
-function getDisplayPeerName(name, ip) {
-  const alias = getPeerAlias(ip);
-  if (alias) return alias;
-  const fallbackName = String(name || "").trim();
-  if (!fallbackName) return normalizeIp(ip) || "Unknown";
-  if (normalizeIp(fallbackName) === normalizeIp(ip)) return normalizeIp(ip) || fallbackName;
-  return fallbackName;
-}
-
-function guessAliasSeed(name, ip) {
-  const trimmed = String(name || "").trim();
-  if (!trimmed) return "";
-  if (normalizeIp(trimmed) === normalizeIp(ip)) return "";
-  if (trimmed.toLowerCase() === "unknown") return "";
-  return trimmed;
-}
-
-function formatAgo(ts) {
-  if (!ts) return "never";
-  const sec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  return `${Math.floor(min / 60)}h ago`;
-}
-
-function renderHealth(payload) {
-  const healthEl = document.getElementById("health");
-  if (healthEl) {
-    healthEl.textContent = JSON.stringify(payload, null, 2);
-  }
-}
-
-function renderModules(modules) {
-  const list = document.getElementById("modules");
-  if (!list) return;
-  list.innerHTML = modules.map((name) => `<li>${escapeHtml(name)}</li>`).join("");
-}
-
-function renderInterfaceOptions(interfaces, selectedIp = "") {
-  const select = document.getElementById("preferred-ip");
-  const options = [
-    '<option value="">Auto (Best LAN IP)</option>',
-    ...interfaces.map(
-      (item) =>
-        `<option value="${escapeHtml(item.address)}">${escapeHtml(item.name)} - ${escapeHtml(item.address)}</option>`,
-    ),
-  ];
-  select.innerHTML = options.join("");
-  select.value = selectedIp || "";
-}
-
-function renderStatusPill(status) {
-  const el = document.getElementById("active-status");
-  const count = status?.diagnostics?.peersCount || peers.length || 0;
-  el.textContent = `${status?.hostname || "Pings"} on ${status?.ip || "n/a"} | ${count} peer${count === 1 ? "" : "s"}`;
-}
-
-function renderNetworkStatus(payload) {
-  latestNetworkStatus = payload || latestNetworkStatus;
-  const networkEl = document.getElementById("network-status");
-  if (networkEl) {
-    networkEl.textContent = JSON.stringify(payload, null, 2);
-  }
-  renderStatusPill(payload);
-}
-
-function renderPersistenceStatus(payload) {
-  const persistenceEl = document.getElementById("persistence-status");
-  if (persistenceEl) {
-    persistenceEl.textContent = JSON.stringify(payload, null, 2);
-  }
-}
-
-function applyUiSettings(settings) {
-  currentSettings = { ...currentSettings, ...(settings || {}) };
-  applyTheme(currentSettings);
-}
-
-async function savePeerAlias(ip, nextName) {
-  const normalizedIp = normalizeIp(ip);
-  if (!normalizedIp) return;
-  const current = { ...getPeerAliases() };
-  const trimmed = String(nextName || "").trim();
-  if (!trimmed) {
-    delete current[normalizedIp];
-  } else {
-    current[normalizedIp] = trimmed;
-  }
-  const settings = await updateSetting("peerAliases", current);
-  applyUiSettings(settings);
-  renderPeers();
-  renderPingFeed();
-  renderTeamChat();
-}
-
-function switchTab(tabName) {
-  document.querySelectorAll(".tab-btn").forEach((btn) => {
-    btn.classList.toggle("active", btn.getAttribute("data-tab") === tabName);
-  });
-  document.querySelectorAll(".tab-panel").forEach((panel) => {
-    panel.classList.toggle("active", panel.getAttribute("data-panel") === tabName);
-  });
-}
-
-function wireTabs() {
-  document.querySelectorAll(".tab-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      switchTab(btn.getAttribute("data-tab") || "people");
-    });
-  });
-}
-
-function setPingButtonState(btn, state) {
-  btn.classList.remove("is-sending", "is-sent", "is-failed");
-  btn.disabled = false;
-  if (state === "sending") {
-    btn.classList.add("is-sending");
-    btn.disabled = true;
-    btn.textContent = "Sending...";
-    return;
-  }
-  if (state === "sent") {
-    btn.classList.add("is-sent");
-    btn.textContent = "Sent";
-    return;
-  }
-  if (state === "failed") {
-    btn.classList.add("is-failed");
-    btn.textContent = "Failed";
-    return;
-  }
-  btn.textContent = "Ping";
-}
-
-function renderPeers() {
-  const peersList = document.getElementById("peers-list");
-  const peersSummary = document.getElementById("peers-summary");
-  const dedupedPeers = Array.isArray(peers)
-    ? Object.values(
-        peers.reduce((acc, peer) => {
-          // Prefer the stable peerId so a peer that changed IP collapses to a
-          // single row instead of appearing twice during the stale window.
-          const key = peer?.peerId || peer?.ip || peer?.name || "unknown-peer";
-          const prev = acc[key];
-          if (!prev || (peer?.lastSeen || 0) > (prev?.lastSeen || 0)) {
-            acc[key] = peer;
-          }
-          return acc;
-        }, {}),
-      )
-    : [];
-
-  if (dedupedPeers.length === 0) {
-    peersSummary.textContent = "No peers discovered yet";
-    peersList.innerHTML = '<div class="empty-state">Waiting for LAN peers...</div>';
-    return;
-  }
-
-  peersSummary.textContent = `${dedupedPeers.length} peer${dedupedPeers.length === 1 ? "" : "s"} discovered`;
-  peersList.innerHTML = dedupedPeers
-    .sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0))
-    .map((peer) => {
-      const peerIp = normalizeIp(peer.ip || "");
-      const peerLabel = getDisplayPeerName(peer.name || "", peerIp);
-      return `
-        <div class="peer-card" style="border-left-color:${escapeHtml(peer.color || "#14b8a6")}">
-          <div class="peer-name">${escapeHtml(peerLabel || "Unknown")}</div>
-          <div class="peer-meta">${escapeHtml(peerIp || "n/a")} | seen ${escapeHtml(formatAgo(peer.lastSeen))}</div>
-          <div class="peer-actions">
-            <button class="ping-btn" data-ip="${escapeHtml(peerIp)}" data-name="${escapeHtml(peerLabel)}">Ping</button>
-            <button class="chat-btn" data-chat-ip="${escapeHtml(peerIp)}" data-chat-name="${escapeHtml(peerLabel)}">Message</button>
-          </div>
-        </div>
-      `;
-    })
-    .join("");
-
-  peersList.querySelectorAll(".ping-btn").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const ip = btn.getAttribute("data-ip") || "";
-      if (!ip) return;
-      setPingButtonState(btn, "sending");
+async function pingPeer(row) {
+  const peer = row.peer;
+  const ip = normalizeIp(peer.ip);
+  if (!ip) return;
+  const key = peerKey(peer);
+  row.pingBtn.disabled = true;
+  try {
+    const message = settings.customMessage || "";
+    const shape = settings.pingShape || "circle";
+    const targetIsV3 = Boolean(String(peer.peerId || "").trim());
+    const sent = await sendPing(ip, message, wireSound(), shape);
+    if (!targetIsV3) {
       try {
-        const message = currentSettings.customMessage || "";
-        const sound = currentSettings.sound || "light";
-        const shape = currentSettings.pingShape || "circle";
-        const wireSound = sound === "light" ? "chime" : sound;
-
-        // Native UDP is the one true delivery path. The legacy socket.io bridge
-        // is only for reaching v1 (Electron) peers, which have no peerId — so we
-        // fire it *only* when the target isn't a known v3 peer. Sending both to a
-        // v3 peer is what caused the double overlay/sound/feed entry.
-        const targetPeer = (Array.isArray(peers) ? peers : []).find(
-          (p) => normalizeIp(p?.ip || "") === ip,
-        );
-        const targetIsV3 = Boolean(targetPeer && String(targetPeer.peerId || "").trim());
-
-        const sent = await sendPing(ip, message, wireSound, shape);
-        let legacyState = "direct";
-        if (!targetIsV3) {
-          const legacyOk = await sendLegacyPing(ip, message, wireSound, shape);
-          legacyState = legacyOk ? "v1 bridge ok" : "v1 bridge n/a";
-        }
-
-        pingFeed.unshift({
-          type: "outgoing",
-          peerIp: ip,
-          peerName: btn.getAttribute("data-name") || "",
-          message: sent?.message || "",
-          timestamp: sent?.timestamp || Date.now(),
-          title: `Ping sent to ${btn.getAttribute("data-name") || ip}`,
-          meta: `${sent?.fromIp || "n/a"} | ${sent?.message || "(no message)"} | ${legacyState} | ${formatAgo(sent?.timestamp)}`,
-        });
-        renderPingFeed();
-        setPingButtonState(btn, "sent");
-      } catch (error) {
-        pingFeed.unshift({
-          type: "failed",
-          peerIp: ip,
-          peerName: btn.getAttribute("data-name") || "",
-          timestamp: Date.now(),
-          title: `Ping failed for ${btn.getAttribute("data-name") || ip}`,
-          meta: String(error),
-        });
-        renderPingFeed();
-        setPingButtonState(btn, "failed");
-      } finally {
-        setTimeout(() => {
-          setPingButtonState(btn, "idle");
-        }, 800);
+        await sendLegacyPing(ip, message, wireSound(), shape);
+      } catch {
+        // v1 bridge unreachable is fine; native path is authoritative.
       }
+    }
+    flashStatus(key, "sent");
+    pushActivity({
+      kind: "ping",
+      direction: "out",
+      peerId: peer.peerId || "",
+      peerIp: ip,
+      peerName: displayName(peer),
+      message,
+      timestamp: sent?.timestamp || Date.now(),
     });
-  });
-
-  peersList.querySelectorAll(".chat-btn").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const ip = btn.getAttribute("data-chat-ip") || "";
-      const name = btn.getAttribute("data-chat-name") || "";
-      if (!ip) return;
-      await openDirectChatWindow(ip, name || null);
-    });
-  });
-}
-
-function renderPingFeed() {
-  const feed = document.getElementById("ping-feed");
-  if (!feed) return;
-  if (!pingFeed.length) {
-    feed.innerHTML = '<div class="empty-state">No pings yet</div>';
-    return;
+  } catch {
+    flashStatus(key, "failed");
+  } finally {
+    row.pingBtn.disabled = false;
   }
-  const rows = pingFeed.slice(0, 20);
-  feed.innerHTML = rows
-    .map((item, index) => {
-      const peerIp = normalizeIp(item.peerIp || "");
-      const peerLabel = getDisplayPeerName(item.peerName || "", peerIp);
-      const title =
-        item.title ||
-        (item.type === "incoming" ? `Ping from ${peerLabel || "Unknown"}` : "Ping update");
-      const meta =
-        item.meta ||
-        `${peerIp || "n/a"} | ${item.message || "(no message)"} | ${formatAgo(item.timestamp)}`;
-      const showNameCta = item.type === "incoming" && Boolean(peerIp);
-      const editing = showNameCta && activeAliasEditIp === peerIp;
-      const hasAlias = Boolean(getPeerAlias(peerIp));
-      const seed = guessAliasSeed(item.peerName || "", peerIp);
-
-      return `
-        <div class="ping-item ${item.type}">
-          <div class="ping-title">${escapeHtml(title)}</div>
-          <div class="ping-meta">${escapeHtml(meta)}</div>
-          ${
-            showNameCta
-              ? `
-            <div class="ping-actions">
-              ${
-                editing
-                  ? `
-                <div class="ping-alias-editor">
-                  <input class="ping-alias-input" data-ip="${escapeHtml(peerIp)}" type="text" value="${escapeHtml(hasAlias ? getPeerAlias(peerIp) : seed)}" placeholder="Enter name" />
-                  <button class="ping-alias-save" data-ip="${escapeHtml(peerIp)}">Save</button>
-                  <button class="ping-alias-cancel" data-ip="${escapeHtml(peerIp)}">Cancel</button>
-                </div>
-              `
-                  : `
-                <button class="ping-name-btn" data-ip="${escapeHtml(peerIp)}" data-seed="${escapeHtml(seed)}">
-                  ${hasAlias ? "Edit Name" : "Add Name"}
-                </button>
-              `
-              }
-            </div>
-          `
-              : ""
-          }
-        </div>
-      `;
-    })
-    .join("");
-
-  feed.querySelectorAll(".ping-name-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      activeAliasEditIp = normalizeIp(btn.getAttribute("data-ip") || "");
-      renderPingFeed();
-      const input = feed.querySelector(`.ping-alias-input[data-ip="${CSS.escape(activeAliasEditIp)}"]`);
-      if (input) {
-        input.focus();
-        input.select();
-      }
-    });
-  });
-
-  feed.querySelectorAll(".ping-alias-cancel").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const ip = normalizeIp(btn.getAttribute("data-ip") || "");
-      if (ip === activeAliasEditIp) {
-        activeAliasEditIp = "";
-        renderPingFeed();
-      }
-    });
-  });
-
-  feed.querySelectorAll(".ping-alias-save").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const ip = normalizeIp(btn.getAttribute("data-ip") || "");
-      const input = feed.querySelector(`.ping-alias-input[data-ip="${CSS.escape(ip)}"]`);
-      const next = (input?.value || "").trim();
-      activeAliasEditIp = "";
-      await savePeerAlias(ip, next);
-    });
-  });
-
-  feed.querySelectorAll(".ping-alias-input").forEach((input) => {
-    input.addEventListener("keydown", async (event) => {
-      const ip = normalizeIp(input.getAttribute("data-ip") || "");
-      if (event.key === "Escape") {
-        activeAliasEditIp = "";
-        renderPingFeed();
-        return;
-      }
-      if (event.key === "Enter") {
-        event.preventDefault();
-        activeAliasEditIp = "";
-        await savePeerAlias(ip, input.value || "");
-      }
-    });
-  });
 }
 
-function renderTeamChat() {
-  const el = document.getElementById("team-chat-messages");
-  if (!el) return;
-  if (!teamMessages.length) {
-    el.innerHTML = '<div class="empty-state">No team messages yet</div>';
-    return;
-  }
-  el.innerHTML = teamMessages
-    .slice(-80)
-    .map((msg) => {
-      const peerLabel = getDisplayPeerName(msg.from || "", msg.fromIp || "");
-      return `
-      <div class="chat-bubble ${msg.mine ? "mine" : ""}">
-        <div><strong>${escapeHtml(peerLabel || "Unknown")}</strong>: ${escapeHtml(msg.message || "")}</div>
-        <div class="chat-meta">${escapeHtml(msg.fromIp || "n/a")} | ${escapeHtml(formatAgo(msg.timestamp))}</div>
-      </div>
-    `;
-    })
-    .join("");
-  el.scrollTop = el.scrollHeight;
+async function messagePeer(row) {
+  const peer = row.peer;
+  const ip = normalizeIp(peer.ip);
+  if (!ip) return;
+  const key = peerKey(peer);
+  unread.delete(key);
+  updateRowStatus(row, key);
+  await openDirectChatWindow(ip, displayName(peer) || null);
 }
 
+// Legacy socket.io ping, sent only to reach v1 (Electron) peers with no peerId.
 function sendLegacyPing(ip, message, sound, shape) {
   return new Promise((resolve) => {
     const socket = io(`http://${ip}:43210`, {
@@ -520,7 +356,7 @@ function sendLegacyPing(ip, message, sound, shape) {
     };
     socket.on("connect", () => {
       socket.emit("ping-user", {
-        from: latestNetworkStatus?.hostname || "Pings v2",
+        from: status?.hostname || "Pings",
         message: message || "",
         sound: sound || "chime",
         shape: shape || "circle",
@@ -531,173 +367,298 @@ function sendLegacyPing(ip, message, sound, shape) {
   });
 }
 
-async function wireChatControls() {
-  const sendTeamBtn = document.getElementById("send-team-chat");
-  const teamInput = document.getElementById("team-chat-input");
+// ---------------------------------------------------------------- activity + footer
 
-  const sendTeam = async () => {
-    const message = (teamInput.value || "").trim();
-    if (!message) return;
-    teamInput.value = "";
-    const sent = await sendTeamChat(message);
-    teamMessages.push({ ...sent, mine: true });
-    renderTeamChat();
-    maybePlayChatSound("send");
-  };
+function pushActivity(event) {
+  historyAll.push(event); // keep oldest-first invariant
+  if (historyAll.length > 500) historyAll = historyAll.slice(-500);
+  updateFooter();
+  if (!el.drawer.hidden && drawerTab === "activity") renderActivity();
+}
 
-  sendTeamBtn.addEventListener("click", () => void sendTeam());
-  teamInput.addEventListener("keydown", (e) => {
+function updateFooter() {
+  const count = historyAll.filter((e) => e.kind === "ping" && isToday(e.timestamp)).length;
+  el.pingsToday.textContent = `${count} ping${count === 1 ? "" : "s"} today`;
+}
+
+function activityTitle(event) {
+  const who = escapeHtml(event.peerName || event.peerIp || "Someone");
+  const mine = event.direction === "out";
+  if (event.kind === "ping") return mine ? `You pinged <strong>${who}</strong>` : `<strong>${who}</strong> pinged you`;
+  if (event.kind === "team-chat")
+    return mine ? `You messaged <strong>the team</strong>` : `<strong>${who}</strong> messaged the team`;
+  return mine ? `You messaged <strong>${who}</strong>` : `<strong>${who}</strong> messaged you`;
+}
+
+function dayLabel(ts) {
+  const d = new Date(ts);
+  const now = new Date();
+  const startOf = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((startOf(now) - startOf(d)) / 86_400_000);
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+}
+
+function renderActivity() {
+  const events = [...historyAll].reverse(); // newest-first for display
+  if (!events.length) {
+    el.activityList.innerHTML = '<div class="empty-state">No activity yet</div>';
+    return;
+  }
+  let html = "";
+  let lastDay = "";
+  for (const event of events) {
+    const day = dayLabel(event.timestamp);
+    if (day !== lastDay) {
+      html += `<div class="day-sep">${escapeHtml(day)}</div>`;
+      lastDay = day;
+    }
+    const glyph = event.kind === "ping" ? "ping" : event.kind === "team-chat" ? "team" : "chat";
+    const msg = event.message
+      ? `<div class="act-msg">${escapeHtml(event.message)}</div>`
+      : "";
+    html += `
+      <div class="act-item">
+        <span class="act-glyph ${glyph}"></span>
+        <div class="act-body">
+          <div class="act-title">${activityTitle(event)}</div>
+          ${msg}
+        </div>
+        <span class="act-time">${escapeHtml(formatAgo(event.timestamp))}</span>
+      </div>`;
+  }
+  el.activityList.innerHTML = html;
+}
+
+// ---------------------------------------------------------------- team chat
+
+function maybeChatSound(kind) {
+  if (!settings.chatSoundsEnabled) return;
+  playSound(kind === "send" ? settings.chatSendSound || "tap" : settings.chatReceiveSound || "bubble");
+}
+
+function renderTeam() {
+  if (!teamMessages.length) {
+    el.teamMessages.innerHTML = '<div class="empty-state">No team messages yet</div>';
+    return;
+  }
+  el.teamMessages.innerHTML = teamMessages
+    .slice(-120)
+    .map(
+      (m) => `
+      <div class="bubble ${m.mine ? "mine" : ""}">
+        <span class="bubble-from">${escapeHtml(m.mine ? "You" : m.from || "Unknown")}</span>
+        ${escapeHtml(m.message || "")}
+      </div>`,
+    )
+    .join("");
+  el.teamMessages.scrollTop = el.teamMessages.scrollHeight;
+}
+
+async function sendTeam() {
+  const message = (el.teamInput.value || "").trim();
+  if (!message) return;
+  el.teamInput.value = "";
+  const sent = await sendTeamChat(message);
+  const ts = sent?.timestamp || Date.now();
+  teamMessages.push({ from: "You", message, mine: true, timestamp: ts });
+  pushActivity({ kind: "team-chat", direction: "out", peerName: "", peerIp: "", message, timestamp: ts });
+  renderTeam();
+  maybeChatSound("send");
+}
+
+// ---------------------------------------------------------------- drawer
+
+function switchTab(tab) {
+  drawerTab = tab;
+  document.querySelectorAll(".tab").forEach((b) => {
+    b.classList.toggle("active", b.dataset.tab === tab);
+  });
+  document.querySelectorAll(".drawer-panel").forEach((p) => {
+    p.classList.toggle("active", p.dataset.panel === tab);
+  });
+  if (tab === "activity") renderActivity();
+  if (tab === "team") {
+    renderTeam();
+    setTimeout(() => el.teamInput.focus(), 40);
+  }
+}
+
+let drawerHideTimer = null;
+function openDrawer(tab) {
+  if (drawerHideTimer) clearTimeout(drawerHideTimer);
+  el.drawer.hidden = false;
+  el.scrim.hidden = false;
+  el.drawer.setAttribute("aria-hidden", "false");
+  requestAnimationFrame(() => el.drawer.classList.add("open"));
+  switchTab(tab);
+}
+
+function closeDrawer() {
+  el.drawer.classList.remove("open");
+  el.scrim.hidden = true;
+  el.drawer.setAttribute("aria-hidden", "true");
+  drawerHideTimer = setTimeout(() => {
+    el.drawer.hidden = true;
+  }, 210);
+}
+
+// ---------------------------------------------------------------- wiring
+
+function wireStaticControls() {
+  el.openOptions.addEventListener("click", () => void openOptionsWindow());
+  el.openTeam.addEventListener("click", () => openDrawer("team"));
+  el.openActivity.addEventListener("click", () => openDrawer("activity"));
+  el.closeDrawer.addEventListener("click", closeDrawer);
+  el.scrim.addEventListener("click", closeDrawer);
+  document.querySelectorAll(".tab").forEach((btn) => {
+    btn.addEventListener("click", () => switchTab(btn.dataset.tab || "activity"));
+  });
+
+  el.teamSend.addEventListener("click", () => void sendTeam());
+  el.teamInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") void sendTeam();
+  });
+
+  el.finder.addEventListener("input", () => {
+    filterText = el.finder.value || "";
+    reconcileList();
+  });
+  el.finder.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      el.finder.value = "";
+      filterText = "";
+      reconcileList();
+      el.finder.blur();
+      return;
+    }
+    if (e.key === "Enter") {
+      const top = sortedFilteredPeers()[0];
+      if (top) {
+        const row = rowEls.get(peerKey(top));
+        if (row) void pingPeer(row);
+      }
+    }
+  });
+
+  window.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      el.finder.focus();
+      el.finder.select();
+    }
+    if (e.key === "Escape" && !el.drawer.hidden) closeDrawer();
   });
 }
 
-async function wireNetworkControls() {
-  const preferredIpSelect = document.getElementById("preferred-ip");
-  const discoveryNodeInput = document.getElementById("discovery-node-ip");
-  const setNodeBtn = document.getElementById("set-node-ip");
-
-  const [interfaces, status] = await Promise.all([getNetworkInterfaces(), getNetworkStatus()]);
-  renderInterfaceOptions(interfaces, status.preferredIp || "");
-  discoveryNodeInput.value = status.discoveryNodeIp || "";
-  renderNetworkStatus(status);
-
-  preferredIpSelect.addEventListener("change", async () => {
-    const updated = await setPreferredIp(preferredIpSelect.value || "");
-    renderNetworkStatus(updated);
-    const refreshed = await getNetworkInterfaces();
-    renderInterfaceOptions(refreshed, updated.preferredIp || "");
-    await updateSetting("preferredIp", updated.preferredIp || "");
-  });
-
-  setNodeBtn.addEventListener("click", async () => {
-    const value = discoveryNodeInput.value.trim();
-    const updated = await setDiscoveryNodeIp(value);
-    renderNetworkStatus(updated);
-    await updateSetting("discoveryNodeIp", value);
+async function wireEvents() {
+  await onPeersUpdated((payload) => {
+    peers = Array.isArray(payload) ? payload : [];
+    reconcileList();
   });
 
   await onNetworkStatus((payload) => {
-    renderNetworkStatus(payload);
-  });
-}
-
-async function wirePersistenceControls() {
-  const profileNameInput = document.getElementById("profile-name");
-  const saveProfileBtn = document.getElementById("save-profile");
-  const customMessageInput = document.getElementById("custom-message");
-  const saveCustomMessageBtn = document.getElementById("save-custom-message");
-  const pingSoundSelect = document.getElementById("ping-sound");
-  const pingShapeSelect = document.getElementById("ping-shape");
-
-  const [profile, settings] = await Promise.all([getProfile(), getSettings()]);
-  applyUiSettings(settings);
-  profileNameInput.value = profile.displayName || "";
-  customMessageInput.value = settings.customMessage || "";
-  pingSoundSelect.value = currentSettings.sound || "light";
-  pingShapeSelect.value = currentSettings.pingShape || "circle";
-  renderPersistenceStatus({ profile, settings });
-
-  saveProfileBtn.addEventListener("click", async () => {
-    const next = {
-      ...profile,
-      displayName: profileNameInput.value.trim(),
-    };
-    const saved = await setProfile(next);
-    renderPersistenceStatus({ profile: saved, settings: await getSettings() });
-    renderStatusPill(await getNetworkStatus());
+    status = payload || status;
+    renderSelf();
   });
 
-  saveCustomMessageBtn.addEventListener("click", async () => {
-    const nextSettings = await updateSetting("customMessage", customMessageInput.value.trim());
-    applyUiSettings(nextSettings);
-    renderPersistenceStatus({ profile: await getProfile(), settings: nextSettings });
-  });
-
-  pingSoundSelect.addEventListener("change", async () => {
-    const next = pingSoundSelect.value || "light";
-    const nextSettings = await updateSetting("sound", next);
-    applyUiSettings({ ...nextSettings, sound: next });
-    renderPersistenceStatus({ profile: await getProfile(), settings: nextSettings });
-    playSound(next);
-  });
-
-  pingShapeSelect.addEventListener("change", async () => {
-    const next = pingShapeSelect.value || "circle";
-    const nextSettings = await updateSetting("pingShape", next);
-    applyUiSettings({ ...nextSettings, pingShape: next });
-    renderPersistenceStatus({ profile: await getProfile(), settings: nextSettings });
-  });
-}
-
-function wireTopbarActions() {
-  const openOptionsBtn = document.getElementById("open-options");
-  openOptionsBtn.addEventListener("click", async () => {
-    await openOptionsWindow();
-  });
-}
-
-window.addEventListener("DOMContentLoaded", async () => {
-  try {
-    wireTabs();
-    await onPeersUpdated((payload) => {
-      peers = Array.isArray(payload) ? payload : [];
-      renderPeers();
+  await onIncomingPing((payload) => {
+    pushActivity({
+      kind: "ping",
+      direction: "in",
+      peerId: payload?.fromPeerId || "",
+      peerIp: normalizeIp(payload?.fromIp || ""),
+      peerName: String(payload?.from || "").trim(),
+      message: payload?.message || "",
+      timestamp: payload?.timestamp || Date.now(),
     });
+  });
 
-    await onIncomingPing((payload) => {
-      const peerIp = normalizeIp(payload?.fromIp || "");
-      const peerName = String(payload?.from || "").trim();
-      const peerLabel = getDisplayPeerName(peerName, peerIp);
-      pingFeed.unshift({
-        type: "incoming",
-        peerIp,
-        peerName,
-        message: payload?.message || "",
-        timestamp: payload?.timestamp || Date.now(),
-        title: `Ping from ${peerLabel || "Unknown"}`,
-        meta: `${peerIp || "n/a"} | ${payload?.message || "(no message)"} | ${formatAgo(payload?.timestamp)}`,
-      });
-      renderPingFeed();
-      playSound(payload?.sound || currentSettings.sound || "light");
+  await onIncomingTeamChat((payload) => {
+    const ts = payload?.timestamp || Date.now();
+    teamMessages.push({
+      from: String(payload?.from || "").trim() || "Unknown",
+      message: payload?.message || "",
+      mine: false,
+      timestamp: ts,
     });
-
-    await onIncomingTeamChat((payload) => {
-      teamMessages.push({ ...payload, mine: false });
-      renderTeamChat();
-      maybePlayChatSound("receive");
+    pushActivity({
+      kind: "team-chat",
+      direction: "in",
+      peerId: payload?.fromPeerId || "",
+      peerIp: normalizeIp(payload?.fromIp || ""),
+      peerName: String(payload?.from || "").trim(),
+      message: payload?.message || "",
+      timestamp: ts,
     });
+    if (!el.drawer.hidden && drawerTab === "team") renderTeam();
+    maybeChatSound("receive");
+  });
 
-    await onIncomingPrivateChat(async (payload) => {
-      const peerIp = payload?.fromIp || "";
-      if (!peerIp) return;
-      maybePlayChatSound("receive");
-      const peerLabel = getDisplayPeerName(payload?.from || "", peerIp);
-      await openDirectChatWindow(peerIp, peerLabel || null);
-    });
-
-    await onSettingsUpdated((settings) => {
-      applyUiSettings(settings || {});
-      renderPeers();
-      renderPingFeed();
-      renderTeamChat();
-    });
-
-    const [healthPayload, modules] = await Promise.all([health(), migrationModules()]);
-    renderHealth(healthPayload);
-    renderModules(modules);
-    wireTopbarActions();
-    await wireNetworkControls();
-    await wirePersistenceControls();
-    await wireChatControls();
-    peers = await getPeers();
-    renderPeers();
-    renderPingFeed();
-    renderTeamChat();
-    switchTab("people");
-  } catch (error) {
-    const healthEl = document.getElementById("health");
-    if (healthEl) {
-      healthEl.textContent = `UI init failed: ${String(error)}`;
+  await onIncomingPrivateChat((payload) => {
+    const key = String(payload?.fromPeerId || "").trim()
+      ? `id:${String(payload.fromPeerId).trim()}`
+      : `ip:${normalizeIp(payload?.fromIp || "")}`;
+    if (key && key !== "ip:") {
+      unread.set(key, (unread.get(key) || 0) + 1);
+      const row = rowEls.get(key);
+      if (row) updateRowStatus(row, key);
     }
+    pushActivity({
+      kind: "chat",
+      direction: "in",
+      peerId: payload?.fromPeerId || "",
+      peerIp: normalizeIp(payload?.fromIp || ""),
+      peerName: String(payload?.from || "").trim(),
+      message: payload?.message || "",
+      timestamp: payload?.timestamp || Date.now(),
+    });
+  });
+
+  await onSettingsUpdated((next) => {
+    settings = { ...settings, ...(next || {}) };
+    applyTheme(settings);
+  });
+}
+
+async function boot() {
+  cacheElements();
+  wireStaticControls();
+  try {
+    const [loadedSettings, loadedProfile, loadedStatus] = await Promise.all([
+      getSettings(),
+      getProfile(),
+      getNetworkStatus(),
+    ]);
+    settings = { ...settings, ...(loadedSettings || {}) };
+    profile = loadedProfile || {};
+    status = loadedStatus || null;
+    applyTheme(settings);
+    renderSelf();
+
+    const [loadedPeers, loadedHistory] = await Promise.all([getPeers(), getHistory(200)]);
+    peers = Array.isArray(loadedPeers) ? loadedPeers : [];
+    historyAll = Array.isArray(loadedHistory) ? loadedHistory : [];
+    teamMessages = historyAll
+      .filter((e) => e.kind === "team-chat")
+      .map((e) => ({
+        from: e.direction === "out" ? "You" : e.peerName || "Unknown",
+        message: e.message,
+        mine: e.direction === "out",
+        timestamp: e.timestamp,
+      }));
+
+    reconcileList();
+    updateFooter();
+    await wireEvents();
+
+    // Keep relative times + presence honest without a server round-trip.
+    setInterval(() => reconcileList(), 30_000);
+  } catch (error) {
+    el.peerEmpty.hidden = false;
+    el.peerEmpty.textContent = `Couldn't start: ${String(error)}`;
   }
-});
+}
+
+window.addEventListener("DOMContentLoaded", () => void boot());

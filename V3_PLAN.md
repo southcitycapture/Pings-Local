@@ -125,3 +125,18 @@ Landed and compile-verified (`cargo check` clean, `cargo test` green, frontend b
 - **Persistent history (SQLite).** New `store.rs` (rusqlite, WAL) records every ping and chat, in and out, and backs `get_history`/`clear_history` — the v2 commands that existed but were wired to a file nothing ever wrote. Activity now survives restarts; unit tests cover ordering, limit, and clear.
 
 Still to do in v3.0: the single-runtime service refactor (channels instead of `Arc<Mutex<Everything>>`), ack-based delivery states on the wire, and retiring the subnet port-scanner.
+
+### v3.1 — Shell (the redesign lands)
+
+The main window is now the buddy list from the mockup, built on the shared frontend core:
+
+- **Shared core, no more copy-paste.** `src/core/tokens.css` is the single palette (the ~10 tokens; dark mode is a token swap and nothing else), imported by the main and DM windows. `src/core/format.js` and `src/core/sound.js` replace the formatter/sound helpers that were pasted into three files.
+- **Buddy-list main window.** One row per person: avatar, name, a presence dot, `IP · last-seen` in mono. Hover reveals **Message** and an amber **Ping**; double-click or the row's Enter key pings. Rows render with a **keyed reconcile** — no more full-`innerHTML` wipes, so a ping arriving mid-type no longer steals focus or resets a button. State shows as form (presence dot, unread badge, transient "Sent ✓" chip), not mono metadata paragraphs.
+- **⌘K finder.** The hint bar is a real filter: ⌘K focuses it, typing narrows the list, Enter pings the top match. (The global-shortcut / standalone palette version is still v3.2.)
+- **Activity + Team drawer.** A slide-up drawer, opened from the footer, with an Activity timeline (merged ping/chat history from SQLite, grouped by day) and a Team chat tab — both seeded from the persisted store, so they survive restarts.
+- **DM window** restyled onto the same tokens.
+- Main window resized to buddy-list dimensions (400×640).
+
+Verified by rendering the built UI headless (Chromium) with a mocked bridge and screenshotting light + dark, resting/hover, and both drawer tabs. That pass caught and fixed a real bug (the drawer's tab pills had no click handler).
+
+Still to do in v3.1: onboarding (first-run name + effect preview), and moving the remaining settings surface fully into one window.
