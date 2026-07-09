@@ -18,6 +18,8 @@ const fields = {
   chatSoundsEnabled: document.getElementById("chat-sounds-enabled"),
   chatSendSound: document.getElementById("chat-send-sound"),
   chatReceiveSound: document.getElementById("chat-receive-sound"),
+  customMessage: document.getElementById("custom-message"),
+  profileName: document.getElementById("profile-name"),
   avatarInput: document.getElementById("profile-avatar-input"),
   avatarPreview: document.getElementById("profile-avatar-preview"),
   clearAvatar: document.getElementById("clear-profile-avatar"),
@@ -25,12 +27,24 @@ const fields = {
   updateStatus: document.getElementById("update-status"),
 };
 
+const RANGE_LABELS = {
+  effectOpacity: (v) => `${Math.round(Number(v) * 100)}%`,
+  borderThickness: (v) => `${v}px`,
+  effectFeather: (v) => `${v}px`,
+  effectDurationMs: (v) => `${(Number(v) / 1000).toFixed(2)}s`,
+};
+
+function updateRangeLabel(key) {
+  const el = document.getElementById(`${fields[key].id}-value`);
+  if (el) el.textContent = RANGE_LABELS[key](fields[key].value);
+}
+
 const statusEl = document.getElementById("status");
 let profileCache = null;
-const updateButtonLabel = fields.checkUpdates?.textContent || "Check for Updates";
+const updateButtonLabel = fields.checkUpdates?.textContent || "Check for updates";
 
 function applyTheme(settings) {
-  document.body.classList.toggle("dark", Boolean(settings?.darkMode));
+  document.documentElement.setAttribute("data-theme", settings?.darkMode ? "dark" : "light");
 }
 
 function renderStatus(payload) {
@@ -146,6 +160,8 @@ function applyToInputs(settings) {
   fields.chatSoundsEnabled.checked = settings.chatSoundsEnabled !== false;
   fields.chatSendSound.value = settings.chatSendSound || "tap";
   fields.chatReceiveSound.value = settings.chatReceiveSound || "bubble";
+  fields.customMessage.value = settings.customMessage || "";
+  ["effectOpacity", "borderThickness", "effectFeather", "effectDurationMs"].forEach(updateRangeLabel);
   applyTheme(settings);
 }
 
@@ -208,20 +224,34 @@ window.addEventListener("DOMContentLoaded", async () => {
   const [settings, profile] = await Promise.all([invoke("get_settings"), invoke("get_profile")]);
   profileCache = profile;
   applyToInputs(settings);
+  fields.profileName.value = profile?.displayName || "";
   renderAvatar(profile);
   renderStatus({ settings, profile });
 
+  fields.customMessage.addEventListener("change", () =>
+    saveSetting("customMessage", fields.customMessage.value.trim()),
+  );
+  fields.profileName.addEventListener("change", async () => {
+    await saveProfile({ ...(profileCache || {}), displayName: fields.profileName.value.trim() });
+  });
+
   fields.effectColor.addEventListener("change", () => saveSetting("effectColor", fields.effectColor.value));
-  fields.effectOpacity.addEventListener("input", () => saveSetting("effectOpacity", Number(fields.effectOpacity.value)));
-  fields.borderThickness.addEventListener("input", () =>
-    saveSetting("borderThickness", Number(fields.borderThickness.value)),
-  );
-  fields.effectFeather.addEventListener("input", () =>
-    saveSetting("effectFeather", Number(fields.effectFeather.value)),
-  );
-  fields.effectDurationMs.addEventListener("input", () =>
-    saveSetting("effectDurationMs", Number(fields.effectDurationMs.value)),
-  );
+  fields.effectOpacity.addEventListener("input", () => {
+    updateRangeLabel("effectOpacity");
+    saveSetting("effectOpacity", Number(fields.effectOpacity.value));
+  });
+  fields.borderThickness.addEventListener("input", () => {
+    updateRangeLabel("borderThickness");
+    saveSetting("borderThickness", Number(fields.borderThickness.value));
+  });
+  fields.effectFeather.addEventListener("input", () => {
+    updateRangeLabel("effectFeather");
+    saveSetting("effectFeather", Number(fields.effectFeather.value));
+  });
+  fields.effectDurationMs.addEventListener("input", () => {
+    updateRangeLabel("effectDurationMs");
+    saveSetting("effectDurationMs", Number(fields.effectDurationMs.value));
+  });
   fields.reduceMotion.addEventListener("change", () => saveSetting("reduceMotion", fields.reduceMotion.checked));
   fields.sound.addEventListener("change", () => saveSetting("sound", fields.sound.value));
   fields.pingShape.addEventListener("change", () => saveSetting("pingShape", fields.pingShape.value));
@@ -258,4 +288,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     applyToInputs(payload);
     renderStatus({ settings: payload, profile: profileCache });
   });
+
+  document.querySelector(".win-enter")?.classList.add("win-ready");
 });

@@ -60,7 +60,8 @@ Stop being a mini-Slack dashboard. Pings is a **presence utility**:
 - **Menubar/tray first.** Tray menu lists peers for one-click pings; the window is optional. Global shortcut summons a **⌘K palette**: type two letters of a name, Enter to ping, ⇧Enter to ping with a note.
 - **Activity is a drawer**, not a permanent third panel — a merged timeline (pings + chats) with day separators, persisted across restarts.
 - **One settings window.** The main window has zero settings UI.
-- **Overlay v2**: respects DND, honors the position setting, and shows the (currently dead) quick replies as one-click response chips.
+- **Overlay v2 — the full-screen border ping stays.** The whole-screen, click-through, always-on-top attention flash is the soul of the app and carries over intact, with every effect setting kept (color, thickness, feather, duration, circle vs. border). What's added: it finally respects DND, honors the position setting, and shows the (currently dead) quick replies as one-click response chips.
+- **Agent peers.** Because v3 peers are stable identities speaking a documented protocol, an AI agent can join the network as just another peer. Presence gains a `kind: human | agent` field; agents appear in the buddy list with a badge and can be pinged and DM'd like anyone else, with real delivery states. We ship a reference bridge — a small headless daemon that speaks the Pings protocol on one side and plugs a local model or agent harness (Ollama/llama.cpp, OpenClaw-style frameworks, Hermes-class local models) into the other — and the protocol doc lets anyone write their own agent without us.
 - **Real onboarding**: first run asks your name, previews the ping effect, done.
 
 ### Architecture
@@ -103,9 +104,100 @@ The full visual direction is mocked up in [`docs/v3-mockup.html`](./docs/v3-mock
 |-------|-------|---------|
 | **v3.0 — Core** | peerId + envelope protocol + acks, single-runtime networking, SQLite store, kill double-delivery | Solid foundation under the existing UI |
 | **v3.1 — Shell** | New main window + single settings window + DM windows on the shared frontend core | The redesign lands |
-| **v3.2 — Slick** | Tray quick-ping, global shortcut, ⌘K palette, overlay v2 (DND, position, quick replies), onboarding, real sounds | The "one keystroke" promise |
-| **v3.3 — Ship** | Signed HTTPS updater, CSP, packaging, Linux port | Distributable |
+| **v3.2 — Slick** | Tray quick-ping, global shortcut, ⌘K palette, overlay v2 (full-screen border effect + DND, position, quick replies), onboarding, real sounds | The "one keystroke" promise |
+| **v3.3 — Agents** | `kind: agent` presence, agent badge in the UI, reference bridge daemon for local models/harnesses, published protocol doc | AI teammates in the buddy list |
+| **v3.4 — Ship** | Signed HTTPS updater, CSP, packaging, Linux port | Distributable |
 
 ### What gets deleted
 
 The best part of v3 is the code that stops existing: the legacy socket.io runtime (eventually), the subnet scanner, the discovery-node stub, the emit-six-times context timer, the name-based window labels, the three copies of every helper, and the hidden `<pre>` debug panels.
+
+---
+
+## Progress
+
+### v3.0 — Core (in progress)
+
+Landed and compile-verified (`cargo check` clean, `cargo test` green, frontend builds):
+
+- **Stable peer identity.** A UUID `peerId` is generated once and persisted in `profile.json`, advertised in the mDNS TXT record, and carried on every ping/chat payload. Peers now hold both an IP (routing) and a `peerId` (identity); a new `upsert_peer_locked` helper preserves identity/color/name across updates so a bare legacy ping never clobbers what mDNS learned. The main window dedupes peers by `peerId`, so a peer that changes IP collapses to one row instead of two.
+- **Double ping delivery killed.** The frontend now sends the native UDP ping once, and only falls back to the legacy socket.io bridge when the target is *not* a known v3 peer (i.e. has no `peerId`) — so two v3 peers get exactly one overlay, one sound, one feed entry, while v1 Electron peers stay reachable.
+- **Persistent history (SQLite).** New `store.rs` (rusqlite, WAL) records every ping and chat, in and out, and backs `get_history`/`clear_history` — the v2 commands that existed but were wired to a file nothing ever wrote. Activity now survives restarts; unit tests cover ordering, limit, and clear.
+- **Delivery states (acks).** Every private message carries a generated id. The recipient's backend sends an `ack` packet back on the chat port; the sender's listener emits a `chat-ack` event, and the DM window moves the message from **✓ sent** to **✓✓ delivered**. Acks are best-effort (a lost ack just leaves "sent"), never recorded as history, and never loop. This replaces v2's fire-and-forget UDP with real, visible delivery confidence.
+- **Port-scanner retired.** The automatic subnet probe is gone — the 24-thread TCP sweep of all 254 addresses that treated any open port 43211 as a Pings peer (inventing phantom peers and scanning the whole network on a timer). Discovery is now mDNS plus the ping/chat listeners populating peers on contact. Its dead diagnostics fields and now-unused imports were removed with it. (Manual "Add by IP" remains a future escape hatch for mDNS-blocked networks.)
+- **Panic-safe locking.** Every one of the ~36 `state.inner.lock().expect("network state poisoned")` sites — the review's "one panic while holding the lock cascades into panics everywhere" — now goes through `lock_runtime()`, which recovers from a poisoned mutex (`into_inner()`) instead of re-panicking. A single thread hiccup can no longer take down every listener; the networking layer is panic-free in steady state.
+
+### On the single-runtime refactor — descoped, deliberately
+
+The plan originally called for rewriting networking onto a single tokio runtime with `mpsc`-channel actor services. **Recommendation: don't, at least not now.** The concrete reliability problem it was meant to solve (cascade panics) is fixed directly by `lock_runtime()`; the rest is stylistic. The current threads-plus-one-recovering-mutex design is simple, has no lock nesting (so no deadlock risk), and — as of the two-machine test — is validated working on real hardware including cross-version (v3 ↔ v2). A big-bang concurrency rewrite of working, validated networking code trades real regression risk (dropped events, ordering, deadlocks) for polish. If we ever add many more message types or need backpressure, revisit it then; today v3.0's internals are solid.
+
+**v3.0 core is complete.**
+
+### v3.2 — the one-keystroke layer (in progress)
+
+- **Menubar tray with quick-ping.** A tray icon whose menu lists everyone
+  currently on the network — one click pings them with your default
+  message/sound/shape and logs it to history just like a window ping — plus
+  **Open Pings** and **Quit Pings**. The menu rebuilds as peers come and go.
+  Compiles clean against Tauri 2.10; behavior needs on-device testing (a tray
+  can't be exercised headless). Hide-to-menubar on window close is intentionally
+  deferred until the tray is confirmed rendering, so there's always an obvious
+  way to quit during first testing.
+
+- **Global shortcut + command palette.** A global hotkey (**Cmd/Ctrl+Shift+K**)
+  toggles a borderless, always-on-top palette window: type to filter everyone on
+  the network, ↑/↓ to choose, **Enter** to ping, **Cmd+Enter** to message,
+  **Esc** to close — then it hides itself. The "one keystroke" promise, available
+  even when the main window is closed. Palette UI verified headless (filter +
+  selection, light/dark); the global-shortcut registration and window toggle need
+  on-device testing.
+
+- **Quick-reply toast + Do Not Disturb.** On an incoming ping, a small
+  interactive card appears top-right (`src-tauri/src/toast.rs` +
+  `src/toast.*`) with the sender, their message, and one-tap quick replies
+  (from the `quickReplies` setting) that send a private chat back — separate
+  from the click-through border flash so the buttons are clickable. Shown and
+  focused from the main thread (the lesson from the double-click saga). This
+  also activates the long-dead **DND** setting: when on, it suppresses the
+  border flash, the toast, and the sound (the ping is still logged to
+  activity). Toast UI verified headless; window focus/positioning need
+  on-device confirmation. **v3.2 is complete** apart from that on-device check.
+
+### v3.3 — Agent peers (AI teammates in the buddy list)
+
+- **The app understands agents.** Peers now carry a `kind` (`human`｜`agent`),
+  advertised in the mDNS TXT record and read on discovery. Agent rows get a
+  🤖 avatar and an **AI** badge in the buddy list, but are otherwise ordinary
+  peers — you ping and DM them exactly like people, with the same delivery
+  states.
+- **The protocol is documented.** [`docs/PROTOCOL.md`](./docs/PROTOCOL.md)
+  writes down the whole wire contract — the mDNS service, the two UDP ports, the
+  ping/chat/ack JSON envelopes — so anyone can build an agent in any language.
+- **A reference bridge ships.** [`agent-bridge/`](./agent-bridge) is a ~150-line
+  Node daemon that announces itself as `kind=agent`, listens for private
+  messages, acks them, and replies via a local LLM (Ollama) with a canned-echo
+  fallback. Its message loop is verified on loopback (receive → ack → reply,
+  with a self-filter so it never talks to itself); mDNS advertising runs without
+  crashing. Because an agent is "just a peer," the app needed almost nothing to
+  support it — the point of the v3 protocol work.
+
+**v3.3 core is complete.** Remaining (with the app on real hardware): confirm an
+agent is discovered and round-trips a real LLM reply.
+
+### v3.1 — Shell (the redesign lands)
+
+The main window is now the buddy list from the mockup, built on the shared frontend core:
+
+- **Shared core, no more copy-paste.** `src/core/tokens.css` is the single palette (the ~10 tokens; dark mode is a token swap and nothing else), imported by the main and DM windows. `src/core/format.js` and `src/core/sound.js` replace the formatter/sound helpers that were pasted into three files.
+- **Buddy-list main window.** One row per person: avatar, name, a presence dot, `IP · last-seen` in mono. Hover reveals **Message** and an amber **Ping**; double-click or the row's Enter key pings. Rows render with a **keyed reconcile** — no more full-`innerHTML` wipes, so a ping arriving mid-type no longer steals focus or resets a button. State shows as form (presence dot, unread badge, transient "Sent ✓" chip), not mono metadata paragraphs.
+- **⌘K finder.** The hint bar is a real filter: ⌘K focuses it, typing narrows the list, Enter pings the top match. (The global-shortcut / standalone palette version is still v3.2.)
+- **Activity + Team drawer.** A slide-up drawer, opened from the footer, with an Activity timeline (merged ping/chat history from SQLite, grouped by day) and a Team chat tab — both seeded from the persisted store, so they survive restarts.
+- **DM window** restyled onto the same tokens.
+- **First-run onboarding.** A launch card asks your name and lets you preview the ping effect (a glowing border, a taste of the overlay) before landing on the buddy list. This finally activates the `hasCompletedOnboarding` setting v2 stored but never used.
+- Main window resized to buddy-list dimensions (400×640).
+
+Verified by rendering the built UI headless (Chromium) with a mocked bridge and screenshotting light + dark, resting/hover, both drawer tabs, and the full onboarding flow through dismissal. That pass caught and fixed a real bug (the drawer's tab pills had no click handler).
+
+- **Settings consolidated into one window.** The Options window is rebuilt on the shared tokens (light/dark, no more CDN font or `body.dark`), and the profile **name** and default-ping **message** fields — which the main-window redesign had dropped — are recovered here, so Options is the single settings home. Ping-effect sliders show live values (opacity %, px, seconds).
+
+**v3.1 shell is complete.**

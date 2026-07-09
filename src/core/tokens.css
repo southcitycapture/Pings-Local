@@ -1,0 +1,140 @@
+/*
+ * Pings v3 design tokens — the single source of truth for the palette.
+ * Every window imports this; components reference only the custom properties
+ * below, never raw hex. Dark mode is a token swap and nothing else.
+ *
+ * Colors are spent deliberately: --accent (teal) is interactive emphasis,
+ * --ping (amber) belongs to the ping action alone, --presence/--danger are
+ * semantic state. None of them moonlight as decoration.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --ground: #f5f7f6;
+  --surface: #ffffff;
+  --inset: #eef2f1;
+  --ink: #17211e;
+  --muted: #5e6e6a;
+  --line: #e2e8e6;
+
+  --accent: #0e7c6e;
+  --accent-ink: #ffffff;
+  --accent-soft: #e3f1ee;
+
+  --ping: #b45309;
+  --ping-ink: #ffffff;
+  --ping-soft: #f6ede1;
+
+  --presence: #1f9d63;
+  --danger: #c43d3d;
+
+  --shadow-sm: 0 1px 2px rgba(23, 33, 30, 0.06);
+  --shadow-md: 0 1px 2px rgba(23, 33, 30, 0.06), 0 8px 24px rgba(23, 33, 30, 0.08);
+
+  --radius-container: 10px;
+  --radius-control: 6px;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+    system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #0f1514;
+    --surface: #161d1b;
+    --inset: #1d2624;
+    --ink: #e6eeeb;
+    --muted: #8aa09a;
+    --line: #263230;
+
+    --accent: #3ec9b2;
+    --accent-ink: #06231d;
+    --accent-soft: #17302b;
+
+    --ping: #f0a63c;
+    --ping-ink: #241505;
+    --ping-soft: #2b2115;
+
+    --presence: #3dbe84;
+    --danger: #e06c6c;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 28px rgba(0, 0, 0, 0.45);
+  }
+}
+
+/* Explicit theme overrides win over the media query in both directions so an
+ * in-app toggle can force a theme regardless of the OS preference. */
+:root[data-theme="light"] {
+  --ground: #f5f7f6;
+  --surface: #ffffff;
+  --inset: #eef2f1;
+  --ink: #17211e;
+  --muted: #5e6e6a;
+  --line: #e2e8e6;
+  --accent: #0e7c6e;
+  --accent-ink: #ffffff;
+  --accent-soft: #e3f1ee;
+  --ping: #b45309;
+  --ping-ink: #ffffff;
+  --ping-soft: #f6ede1;
+  --presence: #1f9d63;
+  --danger: #c43d3d;
+  --shadow-sm: 0 1px 2px rgba(23, 33, 30, 0.06);
+  --shadow-md: 0 1px 2px rgba(23, 33, 30, 0.06), 0 8px 24px rgba(23, 33, 30, 0.08);
+}
+
+/* Content stays hidden until its data is rendered (JS adds .win-ready), then
+ * fades in as a unit — so the text and rows don't pop in a beat after the
+ * window appears. A safety keyframe forces it visible if .win-ready never
+ * arrives, so nothing can get stuck invisible. */
+.win-enter {
+  opacity: 0;
+}
+
+.win-enter.win-ready {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .win-enter {
+    animation: win-enter-safety 1ms linear 2000ms forwards;
+  }
+  .win-enter.win-ready {
+    transition: opacity 220ms ease-out;
+    animation: none;
+  }
+}
+
+@keyframes win-enter-safety {
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .win-enter {
+    opacity: 1;
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground: #0f1514;
+  --surface: #161d1b;
+  --inset: #1d2624;
+  --ink: #e6eeeb;
+  --muted: #8aa09a;
+  --line: #263230;
+  --accent: #3ec9b2;
+  --accent-ink: #06231d;
+  --accent-soft: #17302b;
+  --ping: #f0a63c;
+  --ping-ink: #241505;
+  --ping-soft: #2b2115;
+  --presence: #3dbe84;
+  --danger: #e06c6c;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 28px rgba(0, 0, 0, 0.45);
+}

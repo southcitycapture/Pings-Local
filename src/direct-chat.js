@@ -5,6 +5,7 @@ import {
   getNetworkStatus,
   getSettings,
   onIncomingPrivateChatWindow,
+  onIncomingChatAck,
   onPeersUpdated,
   onSettingsUpdated,
   sendPrivateChat,
@@ -21,8 +22,7 @@ let lastSettingsFetch = 0;
 let audioContext = null;
 
 function applyTheme(settings = {}) {
-  const isDark = Boolean(settings?.darkMode);
-  document.body.classList.toggle("dark", isDark);
+  document.documentElement.setAttribute("data-theme", settings?.darkMode ? "dark" : "light");
 }
 
 function getCurrentLabel() {
@@ -83,14 +83,19 @@ function renderMessages() {
   }
   el.innerHTML = messages
     .slice(-120)
-    .map(
-      (msg) => `
+    .map((msg) => {
+      const meta = msg.mine
+        ? msg.delivered
+          ? "✓✓ delivered"
+          : "✓ sent"
+        : formatAgo(msg.timestamp);
+      return `
         <div class="bubble ${msg.mine ? "mine" : ""}">
-          <div><strong>${escapeHtml(msg.from || "Unknown")}</strong>: ${escapeHtml(msg.message || "")}</div>
-          <div class="meta">${escapeHtml(msg.fromIp || "n/a")} | ${escapeHtml(formatAgo(msg.timestamp))}</div>
+          ${escapeHtml(msg.message || "")}
+          <div class="meta">${escapeHtml(meta)}</div>
         </div>
-      `,
-    )
+      `;
+    })
     .join("");
   el.scrollTop = el.scrollHeight;
 }
@@ -258,7 +263,7 @@ async function wireComposer() {
     if (!message) return;
     input.value = "";
     const sent = await sendPrivateChat(peerIp, message);
-    messages.push({ ...sent, mine: true });
+    messages.push({ ...sent, mine: true, delivered: false });
     renderMessages();
     await maybePlayChatSound("send");
   };
@@ -308,6 +313,16 @@ window.addEventListener("DOMContentLoaded", async () => {
     await maybePlayChatSound("receive");
   });
 
+  await onIncomingChatAck((payload) => {
+    const id = payload?.id;
+    if (!id) return;
+    const msg = messages.find((m) => m.mine && m.id === id && !m.delivered);
+    if (msg) {
+      msg.delivered = true;
+      renderMessages();
+    }
+  });
+
   await onPeersUpdated(async () => {
     await refreshPeerIdentity();
   });
@@ -319,4 +334,5 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
 
   renderMessages();
+  document.querySelector(".win-enter")?.classList.add("win-ready");
 });

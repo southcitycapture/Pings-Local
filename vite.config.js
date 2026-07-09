@@ -12,6 +12,8 @@ export default defineConfig({
         overlay: resolve(__dirname, "src/overlay.html"),
         options: resolve(__dirname, "src/options.html"),
         directChat: resolve(__dirname, "src/direct-chat.html"),
+        palette: resolve(__dirname, "src/palette.html"),
+        toast: resolve(__dirname, "src/toast.html"),
       },
     },
   },

@@ -1,6 +1,8 @@
 #[cfg(target_os = "macos")]
 use objc2::msg_send;
 #[cfg(target_os = "macos")]
+use objc2::runtime::AnyObject;
+#[cfg(target_os = "macos")]
 use objc2_app_kit::{NSColor, NSWindow};
 #[cfg(target_os = "macos")]
 use objc2_foundation::{ns_string, NSNumber};
@@ -106,6 +108,39 @@ pub fn show_ping_overlay(
     });
 }
 
+/// Paint a window's WKWebView backing the theme ground color so it doesn't flash
+/// white before the page paints its first frame (the "window load flash").
+///
+/// This sets the color on the *webview's* backing layer, not the NSWindow —
+/// setting the NSWindow background bled into the titlebar (the black-titlebar
+/// regression). The webview is made transparent (`drawsBackground = false`) so
+/// its opaque themed layer shows through until the page renders over it, then
+/// the page's own `--ground` background takes over seamlessly.
+#[cfg(target_os = "macos")]
+pub fn paint_window_ground(window: &tauri::WebviewWindow, dark: bool) {
+    let (r, g, b): (f64, f64, f64) = if dark {
+        (15.0 / 255.0, 21.0 / 255.0, 20.0 / 255.0)
+    } else {
+        (245.0 / 255.0, 247.0 / 255.0, 246.0 / 255.0)
+    };
+    let _ = window.with_webview(move |webview| unsafe {
+        let view: &WKWebView = &*webview.inner().cast();
+        let key = ns_string!("drawsBackground");
+        let no_bg = NSNumber::numberWithBool(false);
+        let _: () = msg_send![view, setValue: &*no_bg, forKey: key];
+        let _: () = msg_send![view, setWantsLayer: true];
+        let layer: *mut AnyObject = msg_send![view, layer];
+        if !layer.is_null() {
+            let color = NSColor::colorWithSRGBRed_green_blue_alpha(r, g, b, 1.0);
+            let cg: *mut AnyObject = msg_send![&*color, CGColor];
+            let _: () = msg_send![layer, setBackgroundColor: cg];
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn paint_window_ground(_window: &tauri::WebviewWindow, _dark: bool) {}
+
 pub fn open_options_window(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("options") {
         let _ = window.show();
@@ -113,13 +148,18 @@ pub fn open_options_window(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    WebviewWindowBuilder::new(app, "options", WebviewUrl::App("options.html".into()))
+    let window = WebviewWindowBuilder::new(app, "options", WebviewUrl::App("options.html".into()))
         .title("Pings Options")
         .inner_size(460.0, 700.0)
         .resizable(true)
         .always_on_top(false)
         .build()
         .map_err(|e| format!("open-options-window:{e}"))?;
+
+    let dark = crate::persistence::load_settings(app)
+        .map(|s| s.dark_mode)
+        .unwrap_or(false);
+    paint_window_ground(&window, dark);
 
     Ok(())
 }
@@ -211,7 +251,7 @@ pub fn open_direct_chat_window(
         return Ok(());
     }
 
-    WebviewWindowBuilder::new(app, &label, WebviewUrl::App("direct-chat.html".into()))
+    let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("direct-chat.html".into()))
         .title(&title)
         .inner_size(420.0, 560.0)
         .min_inner_size(320.0, 420.0)
@@ -219,6 +259,11 @@ pub fn open_direct_chat_window(
         .always_on_top(false)
         .build()
         .map_err(|e| format!("open-direct-chat-window:{e}"))?;
+
+    let dark = crate::persistence::load_settings(app)
+        .map(|s| s.dark_mode)
+        .unwrap_or(false);
+    paint_window_ground(&window, dark);
 
     emit_direct_chat_context(app, label, context);
     Ok(())

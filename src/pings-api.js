@@ -45,8 +45,8 @@ export function setProfile(profile) {
   return invoke("set_profile", { profile });
 }
 
-export function getHistory() {
-  return invoke("get_history");
+export function getHistory(limit) {
+  return invoke("get_history", { limit });
 }
 
 export function clearHistory() {
@@ -105,6 +105,18 @@ export async function onIncomingPrivateChatWindow(callback) {
   return listen("incoming-private-chat-window", (event) => callback(event.payload));
 }
 
+export async function onIncomingChatAck(callback) {
+  return listen("chat-ack", (event) => callback(event.payload));
+}
+
 export async function onSettingsUpdated(callback) {
   return listen("settings-updated", (event) => callback(event.payload));
+}
+
+export function hidePalette() {
+  return invoke("hide_palette");
+}
+
+export function hideToast() {
+  return invoke("hide_toast");
 }
