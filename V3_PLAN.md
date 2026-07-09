@@ -163,6 +163,27 @@ The plan originally called for rewriting networking onto a single tokio runtime 
   activity). Toast UI verified headless; window focus/positioning need
   on-device confirmation. **v3.2 is complete** apart from that on-device check.
 
+### v3.3 — Agent peers (AI teammates in the buddy list)
+
+- **The app understands agents.** Peers now carry a `kind` (`human`｜`agent`),
+  advertised in the mDNS TXT record and read on discovery. Agent rows get a
+  🤖 avatar and an **AI** badge in the buddy list, but are otherwise ordinary
+  peers — you ping and DM them exactly like people, with the same delivery
+  states.
+- **The protocol is documented.** [`docs/PROTOCOL.md`](./docs/PROTOCOL.md)
+  writes down the whole wire contract — the mDNS service, the two UDP ports, the
+  ping/chat/ack JSON envelopes — so anyone can build an agent in any language.
+- **A reference bridge ships.** [`agent-bridge/`](./agent-bridge) is a ~150-line
+  Node daemon that announces itself as `kind=agent`, listens for private
+  messages, acks them, and replies via a local LLM (Ollama) with a canned-echo
+  fallback. Its message loop is verified on loopback (receive → ack → reply,
+  with a self-filter so it never talks to itself); mDNS advertising runs without
+  crashing. Because an agent is "just a peer," the app needed almost nothing to
+  support it — the point of the v3 protocol work.
+
+**v3.3 core is complete.** Remaining (with the app on real hardware): confirm an
+agent is discovered and round-trips a real LLM reply.
+
 ### v3.1 — Shell (the redesign lands)
 
 The main window is now the buddy list from the mockup, built on the shared frontend core:

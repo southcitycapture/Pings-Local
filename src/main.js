@@ -168,7 +168,11 @@ function createRow(peer, key) {
   const nameText = document.createElement("span");
   const dot = document.createElement("span");
   dot.className = "dot";
-  name.append(nameText, dot);
+  const agentBadge = document.createElement("span");
+  agentBadge.className = "agent-badge";
+  agentBadge.textContent = "AI";
+  agentBadge.hidden = true;
+  name.append(nameText, dot, agentBadge);
   const sub = document.createElement("div");
   sub.className = "sub";
   who.append(name, sub);
@@ -190,7 +194,7 @@ function createRow(peer, key) {
 
   node.append(avatar, who, end);
 
-  Object.assign(row, { node, avatar, nameText, dot, sub, statusSlot, msgBtn, pingBtn });
+  Object.assign(row, { node, avatar, nameText, dot, sub, agentBadge, statusSlot, msgBtn, pingBtn });
 
   pingBtn.addEventListener("click", (e) => {
     e.stopPropagation();
@@ -240,7 +244,9 @@ function updateRow(row, peer, key) {
   row.dot.title = online ? "online" : "away";
   const sub = `${normalizeIp(peer.ip) || "n/a"} · ${online ? "online" : formatAgo(peer.lastSeen)}`;
   if (row.sub.textContent !== sub) row.sub.textContent = sub;
-  const init = initials(label);
+  const isAgent = peer.kind === "agent";
+  row.agentBadge.hidden = !isAgent;
+  const init = isAgent ? "🤖" : initials(label);
   if (row.avatar.textContent !== init) row.avatar.textContent = init;
   updateRowStatus(row, key);
 }

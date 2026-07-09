@@ -39,6 +39,9 @@ pub struct PeerInfo {
     /// detail; identity follows this field.
     pub peer_id: String,
     pub name: String,
+    /// "human" or "agent". Agents (AI bridges) announce `kind=agent` in their
+    /// mDNS TXT record; anything that never said otherwise is a human.
+    pub kind: String,
     pub color: String,
     pub last_seen: u64,
 }
@@ -332,10 +335,17 @@ pub fn set_local_peer_id(state: &NetworkingState, peer_id: String) {
 /// only knows the IP (a legacy ping, a subnet probe) passes an empty
 /// `peer_id`/`name` and never clobbers identity learned from richer sources
 /// like mDNS.
-fn upsert_peer_locked(runtime: &mut NetworkRuntime, ip: &str, peer_id: &str, name: &str) {
+fn upsert_peer_locked(
+    runtime: &mut NetworkRuntime,
+    ip: &str,
+    peer_id: &str,
+    kind: &str,
+    name: &str,
+) {
     let existing = runtime.peers.get(ip);
     let trimmed_name = name.trim();
     let trimmed_id = peer_id.trim();
+    let trimmed_kind = kind.trim();
 
     let color = existing
         .map(|p| p.color.clone())
@@ -353,6 +363,14 @@ fn upsert_peer_locked(runtime: &mut NetworkRuntime, ip: &str, peer_id: &str, nam
             .filter(|n| !n.trim().is_empty())
             .unwrap_or_else(|| ip.to_string())
     };
+    let resolved_kind = if !trimmed_kind.is_empty() {
+        trimmed_kind.to_string()
+    } else {
+        existing
+            .map(|p| p.kind.clone())
+            .filter(|k| !k.trim().is_empty())
+            .unwrap_or_else(|| "human".to_string())
+    };
 
     runtime.peers.insert(
         ip.to_string(),
@@ -360,6 +378,7 @@ fn upsert_peer_locked(runtime: &mut NetworkRuntime, ip: &str, peer_id: &str, nam
             ip: ip.to_string(),
             peer_id: resolved_peer_id,
             name: resolved_name,
+            kind: resolved_kind,
             color,
             last_seen: now_millis(),
         },
@@ -487,7 +506,7 @@ fn touch_peer(state: &NetworkingState, ip: &str, peer_id: &str, name: &str) {
     if is_local_interface_ip(ip, &guard.preferred_ip) {
         return;
     }
-    upsert_peer_locked(&mut guard, ip, peer_id, name);
+    upsert_peer_locked(&mut guard, ip, peer_id, "", name);
 }
 
 pub fn start_status_publisher(app: AppHandle, state: NetworkingState) {
@@ -544,6 +563,7 @@ pub fn start_mdns_discovery(app: AppHandle, state: NetworkingState) {
         let properties = [
             ("name", display_name.as_str()),
             ("id", local_peer_id.as_str()),
+            ("kind", "human"),
         ];
         let service_info = ServiceInfo::new(
             MDNS_SERVICE_TYPE,
@@ -608,9 +628,13 @@ pub fn start_mdns_discovery(app: AppHandle, state: NetworkingState) {
                             .get_property_val_str("id")
                             .map(|v| v.to_string())
                             .unwrap_or_default();
+                        let kind = info
+                            .get_property_val_str("kind")
+                            .map(|v| v.to_string())
+                            .unwrap_or_default();
 
                         let fullname = info.get_fullname().to_string();
-                        upsert_peer_locked(&mut guard, &ip, &peer_id, &name);
+                        upsert_peer_locked(&mut guard, &ip, &peer_id, &kind, &name);
                         guard.peer_fullnames.insert(fullname, ip.clone());
                         guard.diagnostics.mdns_responses_received += 1;
                         guard.diagnostics.last_mdns_response_at = now_millis();
@@ -659,7 +683,7 @@ pub fn start_ping_listener(app: AppHandle, state: NetworkingState) {
             {
                 let mut guard = state.lock_runtime();
                 if !is_local_interface_ip(&from_ip, &guard.preferred_ip) {
-                    upsert_peer_locked(&mut guard, &from_ip, &payload.from_peer_id, &payload.from);
+                    upsert_peer_locked(&mut guard, &from_ip, &payload.from_peer_id, "", &payload.from);
                 }
             }
 
@@ -792,7 +816,7 @@ pub fn start_legacy_ping_listener(app: AppHandle, state: NetworkingState) {
                                 let mut guard =
                                     state_for_emit.lock_runtime();
                                 if !is_local_interface_ip(&from_ip, &guard.preferred_ip) {
-                                    upsert_peer_locked(&mut guard, &from_ip, "", &from_name);
+                                    upsert_peer_locked(&mut guard, &from_ip, "", "", &from_name);
                                 }
                             }
 
