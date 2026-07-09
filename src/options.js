@@ -258,4 +258,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     applyToInputs(payload);
     renderStatus({ settings: payload, profile: profileCache });
   });
+
+  document.querySelector(".win-enter")?.classList.add("win-ready");
 });

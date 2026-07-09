@@ -86,20 +86,37 @@
   --shadow-md: 0 1px 2px rgba(23, 33, 30, 0.06), 0 8px 24px rgba(23, 33, 30, 0.08);
 }
 
-/* Window enter fade. Plays purely on load (no JS trigger) so content eases in
- * over the window's themed background instead of snapping or flashing. */
-@keyframes window-enter {
-  from {
-    opacity: 0;
+/* Content stays hidden until its data is rendered (JS adds .win-ready), then
+ * fades in as a unit — so the text and rows don't pop in a beat after the
+ * window appears. A safety keyframe forces it visible if .win-ready never
+ * arrives, so nothing can get stuck invisible. */
+.win-enter {
+  opacity: 0;
+}
+
+.win-enter.win-ready {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .win-enter {
+    animation: win-enter-safety 1ms linear 2000ms forwards;
   }
+  .win-enter.win-ready {
+    transition: opacity 220ms ease-out;
+    animation: none;
+  }
+}
+
+@keyframes win-enter-safety {
   to {
     opacity: 1;
   }
 }
 
-@media (prefers-reduced-motion: no-preference) {
+@media (prefers-reduced-motion: reduce) {
   .win-enter {
-    animation: window-enter 200ms ease-out both;
+    opacity: 1;
   }
 }
 

@@ -6,7 +6,7 @@ mod store;
 mod tray;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::networking::{network_interfaces, status_payload, NetworkingState};
 
@@ -286,14 +286,6 @@ pub fn run() {
                 }
             }
 
-            // Paint the main window's native background in the theme color so it
-            // doesn't flash black before the webview draws its first frame.
-            if let Some(window) = app.get_webview_window("main") {
-                let dark = persistence::load_settings(app.handle())
-                    .map(|s| s.dark_mode)
-                    .unwrap_or(false);
-                let _ = window.set_background_color(Some(overlay::theme_ground(dark)));
-            }
             Ok(())
         })
         .on_window_event(|window, event| {

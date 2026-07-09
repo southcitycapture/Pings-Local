@@ -697,6 +697,9 @@ async function boot() {
   } catch (error) {
     el.peerEmpty.hidden = false;
     el.peerEmpty.textContent = `Couldn't start: ${String(error)}`;
+  } finally {
+    // Content is rendered — fade it in as a unit (see .win-enter in tokens.css).
+    document.querySelector(".win-enter")?.classList.add("win-ready");
   }
 }
 

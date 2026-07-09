@@ -167,18 +167,33 @@ button {
   min-height: 90px;
 }
 
-/* Window enter fade (matches core/tokens.css; options has its own stylesheet). */
-@keyframes window-enter {
-  from {
-    opacity: 0;
+/* Content reveal (matches core/tokens.css; options has its own stylesheet). */
+.win-enter {
+  opacity: 0;
+}
+
+.win-enter.win-ready {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .win-enter {
+    animation: win-enter-safety 1ms linear 2000ms forwards;
   }
+  .win-enter.win-ready {
+    transition: opacity 220ms ease-out;
+    animation: none;
+  }
+}
+
+@keyframes win-enter-safety {
   to {
     opacity: 1;
   }
 }
 
-@media (prefers-reduced-motion: no-preference) {
+@media (prefers-reduced-motion: reduce) {
   .win-enter {
-    animation: window-enter 200ms ease-out both;
+    opacity: 1;
   }
 }

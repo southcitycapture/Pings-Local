@@ -158,6 +158,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
 
   await reload();
+  document.querySelector(".win-enter")?.classList.add("win-ready");
   el.input.focus();
 
   await onPeersUpdated((payload) => {

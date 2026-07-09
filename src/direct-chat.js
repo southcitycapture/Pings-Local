@@ -334,4 +334,5 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
 
   renderMessages();
+  document.querySelector(".win-enter")?.classList.add("win-ready");
 });
