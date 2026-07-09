@@ -181,6 +181,6 @@ button {
 
 @media (prefers-reduced-motion: no-preference) {
   .win-in {
-    animation: window-enter 170ms ease-out;
+    animation: window-enter 220ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 }

@@ -237,10 +237,17 @@ fn hide_palette(app: AppHandle) {
 
 /// Show the calling window. Windows are created hidden and reveal themselves via
 /// this once their content has painted, so there's no flash of an empty window.
+///
+/// The show/focus must run on the main thread: Tauri dispatches commands off the
+/// main thread, and macOS silently ignores window activation from a background
+/// thread — which left the window visible but not key, so the first click was
+/// swallowed just focusing it. Hopping to the main thread makes it key/active.
 #[tauri::command]
-fn show_self(window: tauri::WebviewWindow) {
-    let _ = window.show();
-    let _ = window.set_focus();
+fn show_self(app: AppHandle, window: tauri::WebviewWindow) {
+    let _ = app.run_on_main_thread(move || {
+        let _ = window.show();
+        let _ = window.set_focus();
+    });
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
