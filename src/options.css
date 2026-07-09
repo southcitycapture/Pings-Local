@@ -166,3 +166,21 @@ button {
   padding: 10px;
   min-height: 90px;
 }
+
+/* Smooth window reveal (matches core/tokens.css; options has its own stylesheet). */
+@keyframes window-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .win-in {
+    animation: window-enter 170ms ease-out;
+  }
+}

@@ -118,6 +118,7 @@ pub fn open_options_window(app: &AppHandle) -> Result<(), String> {
         .inner_size(460.0, 700.0)
         .resizable(true)
         .always_on_top(false)
+        .visible(false)
         .build()
         .map_err(|e| format!("open-options-window:{e}"))?;
 
@@ -217,6 +218,7 @@ pub fn open_direct_chat_window(
         .min_inner_size(320.0, 420.0)
         .resizable(true)
         .always_on_top(false)
+        .visible(false)
         .build()
         .map_err(|e| format!("open-direct-chat-window:{e}"))?;
 

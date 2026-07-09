@@ -1,5 +1,6 @@
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
+import { revealWindow } from "./core/enter.js";
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -258,4 +259,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     applyToInputs(payload);
     renderStatus({ settings: payload, profile: profileCache });
   });
+
+  await revealWindow();
 });

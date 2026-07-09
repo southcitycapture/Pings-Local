@@ -28,6 +28,7 @@ import {
   presenceState,
 } from "./core/format.js";
 import { playSound } from "./core/sound.js";
+import { revealWindow } from "./core/enter.js";
 
 // ---------------------------------------------------------------- state
 
@@ -697,6 +698,9 @@ async function boot() {
   } catch (error) {
     el.peerEmpty.hidden = false;
     el.peerEmpty.textContent = `Couldn't start: ${String(error)}`;
+  } finally {
+    // Reveal the window once painted, even if boot hit an error.
+    await revealWindow();
   }
 }
 

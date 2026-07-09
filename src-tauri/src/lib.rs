@@ -6,7 +6,7 @@ mod store;
 mod tray;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::networking::{network_interfaces, status_payload, NetworkingState};
 
@@ -235,6 +235,14 @@ fn hide_palette(app: AppHandle) {
     palette::hide(&app);
 }
 
+/// Show the calling window. Windows are created hidden and reveal themselves via
+/// this once their content has painted, so there's no flash of an empty window.
+#[tauri::command]
+fn show_self(window: tauri::WebviewWindow) {
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let networking_state = NetworkingState::default();
@@ -285,6 +293,21 @@ pub fn run() {
                     eprintln!("[pings] failed to register palette shortcut: {err}");
                 }
             }
+
+            // Safety net: the main window is created hidden and normally reveals
+            // itself once its UI has painted. If that never happens, show it
+            // anyway so the app can't get stuck with no visible window.
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(3000));
+                    if let Some(window) = handle.get_webview_window("main") {
+                        if !window.is_visible().unwrap_or(true) {
+                            let _ = window.show();
+                        }
+                    }
+                });
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -318,7 +341,8 @@ pub fn run() {
             open_options_window,
             open_direct_chat_window,
             get_direct_chat_context,
-            hide_palette
+            hide_palette,
+            show_self
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

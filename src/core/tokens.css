@@ -86,6 +86,26 @@
   --shadow-md: 0 1px 2px rgba(23, 33, 30, 0.06), 0 8px 24px rgba(23, 33, 30, 0.08);
 }
 
+/* Window enter animation. Applied (via the .win-in class) only after the
+ * window is shown, so content eases in instead of snapping. Without the class
+ * the element renders normally — never leaves anything stuck invisible. */
+@keyframes window-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .win-in {
+    animation: window-enter 170ms ease-out;
+  }
+}
+
 :root[data-theme="dark"] {
   --ground: #0f1514;
   --surface: #161d1b;
