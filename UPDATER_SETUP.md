@@ -1,51 +1,78 @@
-# Pings v2 Local Updater (Fast Testing)
+# Pings updater & release
 
-This is a local-network testing updater flow. It is intentionally simple.
+Pings ships a signed, HTTPS auto-updater. The app checks GitHub Releases for a
+newer signed build and installs it in place.
 
-## One-time setup status (already done)
-- In-app button is wired in Options: `Check for Updates`.
-- Updater plugin is enabled.
-- Config points to local HTTP endpoints:
-  - `http://ZachBook-Pro.local:8123/latest.json`
-  - `http://localhost:8123/latest.json`
-- HTTP updater is allowed for testing (`dangerousInsecureTransportProtocol: true`).
+## How it's wired
 
-## Per-release workflow (quick)
-1. Build app update bundles:
-   - `npm run build:mac:arm64`
-   - `npm run build:mac:x64`
-2. Prepare local updater artifacts and `latest.json`:
-   - `npm run updates:prepare`
-3. Start local update server:
-   - `npm run updates:serve`
-4. On test machines, open Pings -> Options -> `Check for Updates`.
+- **Endpoint** (`src-tauri/tauri.conf.json` → `plugins.updater.endpoints`):
+  `https://github.com/southcitycapture/Pings-Local/releases/latest/download/latest.json`
+  Every release publishes a `latest.json` as a release asset; the app fetches
+  the latest one over HTTPS. No `dangerousInsecureTransportProtocol`, no
+  dev-machine hostnames.
+- **Signature** (`plugins.updater.pubkey`): update bundles are verified against
+  this minisign public key before installing. The matching **private** key
+  (`src-tauri/tauri-update.key`, git-ignored) is only used at build time.
+- **In-app**: Options → `Check for Updates`.
 
-## What `updates:prepare` does
-- Copies built updater bundles into update directory.
-- Writes `latest.json` with the correct signatures and URLs.
-- Default output directory:
-  - `/Volumes/ModelX/Apps/Pings-v2/artifacts`
+## Releasing (CI — the real path)
 
-## What `updates:serve` does
-- Serves files from update directory on port `8123`.
-- Endpoints:
-  - `http://localhost:8123/latest.json`
-  - `http://<your-hostname>.local:8123/latest.json`
+Releases are built and published by GitHub Actions
+(`.github/workflows/release.yml`) on a version tag:
 
-## Required env vars during build
-Build commands need signing env vars so `.sig` files are generated:
+1. Bump the version in **both** `package.json` and
+   `src-tauri/tauri.conf.json` (they must match the tag, e.g. `0.2.0`).
+2. Commit, then push a matching tag:
+   ```bash
+   git tag v0.2.0 && git push origin v0.2.0
+   ```
+3. The workflow builds a **universal** macOS app, signs the updater artifacts,
+   and creates a **draft** GitHub Release with the `.dmg`, the signed update
+   bundle, and `latest.json`.
+4. Review the draft release and publish it. Existing installs will then see the
+   update via `Check for Updates`.
+
+### Required repository secrets
+
+Set these in GitHub → Settings → Secrets and variables → Actions:
+
+| Secret | Value |
+|--------|-------|
+| `TAURI_SIGNING_PRIVATE_KEY` | contents of `src-tauri/tauri-update.key` |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | the key's password (`""` if none) |
+
+`GITHUB_TOKEN` is provided automatically.
+
+## Not yet wired
+
+- **Apple Developer ID signing + notarization.** Until an Apple account exists,
+  the `.app` is ad-hoc signed and Gatekeeper warns on first launch
+  (right-click → Open, or `xattr -dr com.apple.quarantine Pings.app`). When an
+  account is available, add `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
+  `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID`
+  secrets — `tauri-action` will sign and notarize automatically. That's why the
+  release is created as a draft for now.
+- **Linux/Windows targets.** The workflow is macOS-only; add runners to the job
+  matrix when those platforms are in scope.
+
+---
+
+## Appendix: local LAN updater (dev testing only)
+
+For iterating on the update flow over the LAN without cutting a release, there
+are helper scripts (`npm run updates:prepare`, `npm run updates:serve`) that
+serve `latest.json` over plain HTTP on port 8123. **This is dev-only** — it
+needs the production `endpoints`/`dangerousInsecureTransportProtocol` config
+temporarily pointed back at `http://localhost:8123`, and must never ship. Build
+with the signing env vars so `.sig` files are produced:
 
 ```bash
-export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
 export TAURI_SIGNING_PRIVATE_KEY="$(cat src-tauri/tauri-update.key)"
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
+npm run build:mac:arm64        # and/or build:mac:x64
+npm run updates:prepare        # copies bundles + writes latest.json
+npm run updates:serve          # serves on :8123
 ```
 
-## Optional overrides
-- `PINGS_UPDATE_DIR` to change where updater files are written/served.
-- `PINGS_UPDATE_BASE_URL` to force URL generation in `latest.json`.
-- `PINGS_UPDATE_PORT` and `PINGS_UPDATE_HOST` for server binding.
-
-## Security note
-This local updater config uses plain HTTP for LAN testing only.
-Do not use this mode for production distribution.
+Overrides: `PINGS_UPDATE_DIR`, `PINGS_UPDATE_BASE_URL`, `PINGS_UPDATE_PORT`,
+`PINGS_UPDATE_HOST`.
