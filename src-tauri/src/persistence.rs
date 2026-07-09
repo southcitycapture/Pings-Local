@@ -37,22 +37,15 @@ pub struct Settings {
 #[serde(rename_all = "camelCase")]
 #[serde(default)]
 pub struct Profile {
+    /// Stable identity for this install, generated once and persisted.
+    /// Peers, aliases, per-peer sounds and history all key off this rather
+    /// than an IP address, so identity survives a DHCP lease change.
+    pub peer_id: String,
     pub display_name: String,
     pub avatar_color: String,
     pub ping_sound: String,
     pub status: String,
     pub avatar: Option<String>,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HistoryEntry {
-    #[serde(rename = "type")]
-    pub kind: String,
-    pub peer_name: String,
-    pub peer_ip: String,
-    pub message: String,
-    pub timestamp: u64,
 }
 
 impl Default for Settings {
@@ -93,6 +86,7 @@ impl Default for Settings {
 impl Default for Profile {
     fn default() -> Self {
         Self {
+            peer_id: String::new(),
             display_name: String::new(),
             avatar_color: String::new(),
             ping_sound: "chime".to_string(),
@@ -263,12 +257,16 @@ pub fn save_profile(app: &AppHandle, profile: &Profile) -> Result<(), String> {
     write_json(dir.join("profile.json"), profile)
 }
 
-pub fn load_history(app: &AppHandle) -> Result<Vec<HistoryEntry>, String> {
-    let dir = app_data_dir(app)?;
-    Ok(read_json(dir.join("history.json")))
-}
+// History moved to a SQLite store (see `store.rs`); the old `history.json`
+// path was never written to, so there is nothing to migrate.
 
-pub fn clear_history(app: &AppHandle) -> Result<(), String> {
-    let dir = app_data_dir(app)?;
-    write_json::<Vec<HistoryEntry>>(dir.join("history.json"), &Vec::new())
+/// Load the profile, assigning and persisting a stable `peer_id` if one has
+/// not been generated yet. Returns the loaded (and possibly upgraded) profile.
+pub fn load_profile_ensure_peer_id(app: &AppHandle) -> Result<Profile, String> {
+    let mut profile = load_profile(app)?;
+    if profile.peer_id.trim().is_empty() {
+        profile.peer_id = uuid::Uuid::new_v4().to_string();
+        save_profile(app, &profile)?;
+    }
+    Ok(profile)
 }

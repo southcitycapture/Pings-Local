@@ -273,7 +273,9 @@ function renderPeers() {
   const dedupedPeers = Array.isArray(peers)
     ? Object.values(
         peers.reduce((acc, peer) => {
-          const key = peer?.ip || peer?.name || "unknown-peer";
+          // Prefer the stable peerId so a peer that changed IP collapses to a
+          // single row instead of appearing twice during the stale window.
+          const key = peer?.peerId || peer?.ip || peer?.name || "unknown-peer";
           const prev = acc[key];
           if (!prev || (peer?.lastSeen || 0) > (prev?.lastSeen || 0)) {
             acc[key] = peer;
@@ -317,10 +319,24 @@ function renderPeers() {
         const message = currentSettings.customMessage || "";
         const sound = currentSettings.sound || "light";
         const shape = currentSettings.pingShape || "circle";
-        const [sent, legacyOk] = await Promise.all([
-          sendPing(ip, message, sound === "light" ? "chime" : sound, shape),
-          sendLegacyPing(ip, message, sound === "light" ? "chime" : sound, shape),
-        ]);
+        const wireSound = sound === "light" ? "chime" : sound;
+
+        // Native UDP is the one true delivery path. The legacy socket.io bridge
+        // is only for reaching v1 (Electron) peers, which have no peerId — so we
+        // fire it *only* when the target isn't a known v3 peer. Sending both to a
+        // v3 peer is what caused the double overlay/sound/feed entry.
+        const targetPeer = (Array.isArray(peers) ? peers : []).find(
+          (p) => normalizeIp(p?.ip || "") === ip,
+        );
+        const targetIsV3 = Boolean(targetPeer && String(targetPeer.peerId || "").trim());
+
+        const sent = await sendPing(ip, message, wireSound, shape);
+        let legacyState = "direct";
+        if (!targetIsV3) {
+          const legacyOk = await sendLegacyPing(ip, message, wireSound, shape);
+          legacyState = legacyOk ? "v1 bridge ok" : "v1 bridge n/a";
+        }
+
         pingFeed.unshift({
           type: "outgoing",
           peerIp: ip,
@@ -328,7 +344,7 @@ function renderPeers() {
           message: sent?.message || "",
           timestamp: sent?.timestamp || Date.now(),
           title: `Ping sent to ${btn.getAttribute("data-name") || ip}`,
-          meta: `${sent?.fromIp || "n/a"} | ${sent?.message || "(no message)"} | ${legacyOk ? "v1 bridge ok" : "v1 bridge n/a"} | ${formatAgo(sent?.timestamp)}`,
+          meta: `${sent?.fromIp || "n/a"} | ${sent?.message || "(no message)"} | ${legacyState} | ${formatAgo(sent?.timestamp)}`,
         });
         renderPingFeed();
         setPingButtonState(btn, "sent");

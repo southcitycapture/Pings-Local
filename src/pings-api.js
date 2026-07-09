@@ -45,8 +45,8 @@ export function setProfile(profile) {
   return invoke("set_profile", { profile });
 }
 
-export function getHistory() {
-  return invoke("get_history");
+export function getHistory(limit) {
+  return invoke("get_history", { limit });
 }
 
 export function clearHistory() {

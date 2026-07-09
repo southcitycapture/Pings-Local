@@ -1,6 +1,7 @@
 mod networking;
 mod overlay;
 mod persistence;
+mod store;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
@@ -113,23 +114,26 @@ fn set_profile(
 }
 
 #[tauri::command]
-fn get_history(app: AppHandle) -> Result<Vec<persistence::HistoryEntry>, String> {
-    persistence::load_history(&app)
+fn get_history(app: AppHandle, limit: Option<u32>) -> Result<Vec<store::HistoryEvent>, String> {
+    store::history(&app, limit.unwrap_or(200).min(1000))
 }
 
 #[tauri::command]
 fn clear_history(app: AppHandle) -> Result<(), String> {
-    persistence::clear_history(&app)
+    store::clear(&app)
 }
 
 #[tauri::command]
 fn send_ping(
+    app: AppHandle,
     state: State<'_, NetworkingState>,
     ip: String,
     message: String,
     sound: Option<String>,
     shape: Option<String>,
 ) -> Result<networking::PingPayload, String> {
+    let target = networking::peer_by_ip(&state, &ip);
+    let target_ip = ip.clone();
     let payload = networking::send_ping(
         &state,
         ip,
@@ -137,24 +141,76 @@ fn send_ping(
         sound.unwrap_or_else(|| "chime".to_string()),
         shape.unwrap_or_else(|| "circle".to_string()),
     )?;
+    let peer_id = target.as_ref().map(|p| p.peer_id.clone()).unwrap_or_default();
+    let peer_name = target
+        .as_ref()
+        .map(|p| p.name.clone())
+        .unwrap_or_else(|| target_ip.clone());
+    let _ = store::record(
+        &app,
+        &store::HistoryEvent::new(
+            "ping",
+            "out",
+            peer_id,
+            target_ip,
+            peer_name,
+            payload.message.clone(),
+            payload.timestamp,
+        ),
+    );
     Ok(payload)
 }
 
 #[tauri::command]
 fn send_team_chat(
+    app: AppHandle,
     state: State<'_, NetworkingState>,
     message: String,
 ) -> Result<networking::ChatPayload, String> {
-    networking::send_team_chat(&state, message)
+    let payload = networking::send_team_chat(&state, message)?;
+    let _ = store::record(
+        &app,
+        &store::HistoryEvent::new(
+            "team-chat",
+            "out",
+            "",
+            "",
+            "Team",
+            payload.message.clone(),
+            payload.timestamp,
+        ),
+    );
+    Ok(payload)
 }
 
 #[tauri::command]
 fn send_private_chat(
+    app: AppHandle,
     state: State<'_, NetworkingState>,
     ip: String,
     message: String,
 ) -> Result<networking::ChatPayload, String> {
-    networking::send_private_chat(&state, ip, message)
+    let target = networking::peer_by_ip(&state, &ip);
+    let target_ip = ip.clone();
+    let payload = networking::send_private_chat(&state, ip, message)?;
+    let peer_id = target.as_ref().map(|p| p.peer_id.clone()).unwrap_or_default();
+    let peer_name = target
+        .as_ref()
+        .map(|p| p.name.clone())
+        .unwrap_or_else(|| target_ip.clone());
+    let _ = store::record(
+        &app,
+        &store::HistoryEvent::new(
+            "chat",
+            "out",
+            peer_id,
+            target_ip,
+            peer_name,
+            payload.message.clone(),
+            payload.timestamp,
+        ),
+    );
+    Ok(payload)
 }
 
 #[tauri::command]
@@ -191,7 +247,8 @@ pub fn run() {
                     settings.discovery_node_ip,
                 );
             }
-            if let Ok(profile) = persistence::load_profile(app.handle()) {
+            if let Ok(profile) = persistence::load_profile_ensure_peer_id(app.handle()) {
+                networking::set_local_peer_id(&networking_state, profile.peer_id);
                 networking::set_display_name(&networking_state, profile.display_name);
             }
             networking::start_mdns_discovery(app.handle().clone(), networking_state.clone());

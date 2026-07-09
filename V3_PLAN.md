@@ -111,3 +111,17 @@ The full visual direction is mocked up in [`docs/v3-mockup.html`](./docs/v3-mock
 ### What gets deleted
 
 The best part of v3 is the code that stops existing: the legacy socket.io runtime (eventually), the subnet scanner, the discovery-node stub, the emit-six-times context timer, the name-based window labels, the three copies of every helper, and the hidden `<pre>` debug panels.
+
+---
+
+## Progress
+
+### v3.0 — Core (in progress)
+
+Landed and compile-verified (`cargo check` clean, `cargo test` green, frontend builds):
+
+- **Stable peer identity.** A UUID `peerId` is generated once and persisted in `profile.json`, advertised in the mDNS TXT record, and carried on every ping/chat payload. Peers now hold both an IP (routing) and a `peerId` (identity); a new `upsert_peer_locked` helper preserves identity/color/name across updates so a bare legacy ping never clobbers what mDNS learned. The main window dedupes peers by `peerId`, so a peer that changes IP collapses to one row instead of two.
+- **Double ping delivery killed.** The frontend now sends the native UDP ping once, and only falls back to the legacy socket.io bridge when the target is *not* a known v3 peer (i.e. has no `peerId`) — so two v3 peers get exactly one overlay, one sound, one feed entry, while v1 Electron peers stay reachable.
+- **Persistent history (SQLite).** New `store.rs` (rusqlite, WAL) records every ping and chat, in and out, and backs `get_history`/`clear_history` — the v2 commands that existed but were wired to a file nothing ever wrote. Activity now survives restarts; unit tests cover ordering, limit, and clear.
+
+Still to do in v3.0: the single-runtime service refactor (channels instead of `Arc<Mutex<Everything>>`), ack-based delivery states on the wire, and retiring the subnet port-scanner.

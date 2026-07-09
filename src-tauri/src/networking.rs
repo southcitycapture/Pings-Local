@@ -23,6 +23,10 @@ pub struct NetworkingState {
 #[serde(rename_all = "camelCase")]
 pub struct PeerInfo {
     pub ip: String,
+    /// Stable identity for this peer, empty for legacy (v1) or bare
+    /// subnet-probed peers that never announced one. IP is a routing
+    /// detail; identity follows this field.
+    pub peer_id: String,
     pub name: String,
     pub color: String,
     pub last_seen: u64,
@@ -33,6 +37,8 @@ pub struct PeerInfo {
 pub struct PingPayload {
     pub from: String,
     pub from_ip: String,
+    #[serde(default)]
+    pub from_peer_id: String,
     pub message: String,
     pub sound: String,
     pub shape: String,
@@ -45,6 +51,8 @@ pub struct ChatPayload {
     pub kind: String,
     pub from: String,
     pub from_ip: String,
+    #[serde(default)]
+    pub from_peer_id: String,
     pub to_ip: String,
     pub message: String,
     pub timestamp: u64,
@@ -113,6 +121,7 @@ pub struct NetworkDiagnostics {
 pub struct NetworkRuntime {
     pub hostname: String,
     pub display_name: String,
+    pub local_peer_id: String,
     pub preferred_ip: String,
     pub discovery_node_ip: String,
     pub local_ip: String,
@@ -304,6 +313,52 @@ pub fn set_display_name(state: &NetworkingState, name: String) {
     };
 }
 
+pub fn set_local_peer_id(state: &NetworkingState, peer_id: String) {
+    let mut guard = state.inner.lock().expect("network state poisoned");
+    guard.local_peer_id = peer_id.trim().to_string();
+}
+
+/// Insert or refresh a peer, keyed by IP for routing while preserving the
+/// stable `peer_id`, color, and last-known name across updates. A caller that
+/// only knows the IP (a legacy ping, a subnet probe) passes an empty
+/// `peer_id`/`name` and never clobbers identity learned from richer sources
+/// like mDNS.
+fn upsert_peer_locked(runtime: &mut NetworkRuntime, ip: &str, peer_id: &str, name: &str) {
+    let existing = runtime.peers.get(ip);
+    let trimmed_name = name.trim();
+    let trimmed_id = peer_id.trim();
+
+    let color = existing
+        .map(|p| p.color.clone())
+        .unwrap_or_else(|| get_color_from_name(if trimmed_name.is_empty() { ip } else { trimmed_name }));
+    let resolved_peer_id = if !trimmed_id.is_empty() {
+        trimmed_id.to_string()
+    } else {
+        existing.map(|p| p.peer_id.clone()).unwrap_or_default()
+    };
+    let resolved_name = if !trimmed_name.is_empty() {
+        trimmed_name.to_string()
+    } else {
+        existing
+            .map(|p| p.name.clone())
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or_else(|| ip.to_string())
+    };
+
+    runtime.peers.insert(
+        ip.to_string(),
+        PeerInfo {
+            ip: ip.to_string(),
+            peer_id: resolved_peer_id,
+            name: resolved_name,
+            color,
+            last_seen: now_millis(),
+        },
+    );
+    runtime.diagnostics.peers_count = runtime.peers.len();
+    runtime.diagnostics.last_discovery_peer_ip = ip.to_string();
+}
+
 pub fn status_payload(state: &NetworkingState) -> NetworkStatusPayload {
     let guard = state.inner.lock().expect("network state poisoned");
     NetworkStatusPayload {
@@ -406,31 +461,24 @@ pub fn peers_snapshot(state: &NetworkingState) -> Vec<PeerInfo> {
     values
 }
 
-fn touch_peer(state: &NetworkingState, ip: &str, name: &str) {
+/// Look up a known peer by IP so an outbound ping/chat can be recorded with the
+/// recipient's stable identity and display name rather than a bare address.
+pub fn peer_by_ip(state: &NetworkingState, ip: &str) -> Option<PeerInfo> {
+    let guard = state.inner.lock().expect("network state poisoned");
+    let normalized = normalize_ip(ip);
+    guard
+        .peers
+        .get(&normalized)
+        .cloned()
+        .or_else(|| guard.peers.values().find(|p| normalize_ip(&p.ip) == normalized).cloned())
+}
+
+fn touch_peer(state: &NetworkingState, ip: &str, peer_id: &str, name: &str) {
     let mut guard = state.inner.lock().expect("network state poisoned");
     if is_local_interface_ip(ip, &guard.preferred_ip) {
         return;
     }
-    let color = guard
-        .peers
-        .get(ip)
-        .map(|p| p.color.clone())
-        .unwrap_or_else(|| get_color_from_name(name));
-    guard.peers.insert(
-        ip.to_string(),
-        PeerInfo {
-            ip: ip.to_string(),
-            name: if name.trim().is_empty() {
-                ip.to_string()
-            } else {
-                name.trim().to_string()
-            },
-            color,
-            last_seen: now_millis(),
-        },
-    );
-    guard.diagnostics.peers_count = guard.peers.len();
-    guard.diagnostics.last_discovery_peer_ip = ip.to_string();
+    upsert_peer_locked(&mut guard, ip, peer_id, name);
 }
 
 pub fn start_status_publisher(app: AppHandle, state: NetworkingState) {
@@ -535,22 +583,8 @@ fn probe_local_subnet(local_ip: &str, state: &NetworkingState) -> u32 {
                 if is_local_interface_ip(&ip, &guard.preferred_ip) {
                     continue;
                 }
-                let color = guard
-                    .peers
-                    .get(&ip)
-                    .map(|p| p.color.clone())
-                    .unwrap_or_else(|| get_color_from_name(&ip));
-                guard.peers.insert(
-                    ip.clone(),
-                    PeerInfo {
-                        ip: ip.clone(),
-                        name: ip.clone(),
-                        color,
-                        last_seen: now_millis(),
-                    },
-                );
+                upsert_peer_locked(&mut guard, &ip, "", "");
                 guard.diagnostics.last_subnet_hit_ip = ip;
-                guard.diagnostics.peers_count = guard.peers.len();
             }
 
             let mut hits_guard = hits_ref.lock().expect("hits lock poisoned");
@@ -593,17 +627,21 @@ pub fn start_mdns_discovery(app: AppHandle, state: NetworkingState) {
             }
         };
 
-        let (local_ip, host, instance_name, display_name) = {
+        let (local_ip, host, instance_name, display_name, local_peer_id) = {
             let guard = state.inner.lock().expect("network state poisoned");
             (
                 guard.local_ip.clone(),
                 normalize_host(&guard.hostname),
                 guard.hostname.clone(),
                 guard.display_name.clone(),
+                guard.local_peer_id.clone(),
             )
         };
 
-        let properties = [("name", display_name.as_str())];
+        let properties = [
+            ("name", display_name.as_str()),
+            ("id", local_peer_id.as_str()),
+        ];
         let service_info = ServiceInfo::new(
             MDNS_SERVICE_TYPE,
             &instance_name,
@@ -663,28 +701,16 @@ pub fn start_mdns_discovery(app: AppHandle, state: NetworkingState) {
                             .get_property_val_str("name")
                             .map(|v| v.to_string())
                             .unwrap_or_else(|| ip.clone());
-
-                        let color = guard
-                            .peers
-                            .get(&ip)
-                            .map(|p| p.color.clone())
-                            .unwrap_or_else(|| get_color_from_name(&name));
+                        let peer_id = info
+                            .get_property_val_str("id")
+                            .map(|v| v.to_string())
+                            .unwrap_or_default();
 
                         let fullname = info.get_fullname().to_string();
-                        guard.peers.insert(
-                            ip.clone(),
-                            PeerInfo {
-                                ip: ip.clone(),
-                                name,
-                                color,
-                                last_seen: now_millis(),
-                            },
-                        );
+                        upsert_peer_locked(&mut guard, &ip, &peer_id, &name);
                         guard.peer_fullnames.insert(fullname, ip.clone());
                         guard.diagnostics.mdns_responses_received += 1;
                         guard.diagnostics.last_mdns_response_at = now_millis();
-                        guard.diagnostics.last_discovery_peer_ip = ip;
-                        guard.diagnostics.peers_count = guard.peers.len();
                         true
                     };
                     if should_emit {
@@ -730,22 +756,7 @@ pub fn start_ping_listener(app: AppHandle, state: NetworkingState) {
             {
                 let mut guard = state.inner.lock().expect("network state poisoned");
                 if !is_local_interface_ip(&from_ip, &guard.preferred_ip) {
-                    let color = guard
-                        .peers
-                        .get(&from_ip)
-                        .map(|p| p.color.clone())
-                        .unwrap_or_else(|| get_color_from_name(&payload.from));
-                    guard.peers.insert(
-                        from_ip.clone(),
-                        PeerInfo {
-                            ip: from_ip.clone(),
-                            name: payload.from.clone(),
-                            color,
-                            last_seen: now_millis(),
-                        },
-                    );
-                    guard.diagnostics.peers_count = guard.peers.len();
-                    guard.diagnostics.last_discovery_peer_ip = from_ip;
+                    upsert_peer_locked(&mut guard, &from_ip, &payload.from_peer_id, &payload.from);
                 }
             }
 
@@ -760,9 +771,40 @@ pub fn start_ping_listener(app: AppHandle, state: NetworkingState) {
                 &payload.shape,
                 payload.timestamp,
             );
+            record_incoming_ping(&app, &payload);
             let _ = app.emit("incoming-ping", payload);
         }
     });
+}
+
+fn record_incoming_ping(app: &AppHandle, payload: &PingPayload) {
+    let _ = crate::store::record(
+        app,
+        &crate::store::HistoryEvent::new(
+            "ping",
+            "in",
+            payload.from_peer_id.clone(),
+            payload.from_ip.clone(),
+            payload.from.clone(),
+            payload.message.clone(),
+            payload.timestamp,
+        ),
+    );
+}
+
+fn record_incoming_chat(app: &AppHandle, kind: &str, payload: &ChatPayload) {
+    let _ = crate::store::record(
+        app,
+        &crate::store::HistoryEvent::new(
+            kind,
+            "in",
+            payload.from_peer_id.clone(),
+            payload.from_ip.clone(),
+            payload.from.clone(),
+            payload.message.clone(),
+            payload.timestamp,
+        ),
+    );
 }
 
 pub fn start_legacy_ping_listener(app: AppHandle, state: NetworkingState) {
@@ -815,6 +857,7 @@ pub fn start_legacy_ping_listener(app: AppHandle, state: NetworkingState) {
                             let payload = PingPayload {
                                 from: from_name.clone(),
                                 from_ip: from_ip.clone(),
+                                from_peer_id: String::new(),
                                 message: data.message.unwrap_or_default(),
                                 sound: data.sound.unwrap_or_else(|| "chime".to_string()),
                                 shape: data.shape.unwrap_or_else(|| "circle".to_string()),
@@ -825,22 +868,7 @@ pub fn start_legacy_ping_listener(app: AppHandle, state: NetworkingState) {
                                 let mut guard =
                                     state_for_emit.inner.lock().expect("network state poisoned");
                                 if !is_local_interface_ip(&from_ip, &guard.preferred_ip) {
-                                    let color = guard
-                                        .peers
-                                        .get(&from_ip)
-                                        .map(|p| p.color.clone())
-                                        .unwrap_or_else(|| get_color_from_name(&from_name));
-                                    guard.peers.insert(
-                                        from_ip.clone(),
-                                        PeerInfo {
-                                            ip: from_ip.clone(),
-                                            name: from_name.clone(),
-                                            color,
-                                            last_seen: now_millis(),
-                                        },
-                                    );
-                                    guard.diagnostics.peers_count = guard.peers.len();
-                                    guard.diagnostics.last_discovery_peer_ip = from_ip;
+                                    upsert_peer_locked(&mut guard, &from_ip, "", &from_name);
                                 }
                             }
 
@@ -855,6 +883,7 @@ pub fn start_legacy_ping_listener(app: AppHandle, state: NetworkingState) {
                                 &payload.shape,
                                 payload.timestamp,
                             );
+                            record_incoming_ping(&app_for_emit, &payload);
                             let _ = app_for_emit.emit("incoming-ping", payload);
                         }
                     });
@@ -928,7 +957,7 @@ pub fn start_chat_listener(app: AppHandle, state: NetworkingState) {
             }
 
             payload.from_ip = source_ip.clone();
-            touch_peer(&state, &source_ip, &payload.from);
+            touch_peer(&state, &source_ip, &payload.from_peer_id, &payload.from);
             emit_peers_snapshot(&app, &state);
             emit_network_status(&app, &state);
 
@@ -954,10 +983,12 @@ pub fn start_chat_listener(app: AppHandle, state: NetworkingState) {
                         value,
                     );
                 }
+                record_incoming_chat(&app, "chat", &payload);
                 let _ = app.emit("incoming-private-chat", payload);
                 continue;
             }
 
+            record_incoming_chat(&app, "team-chat", &payload);
             let _ = app.emit("incoming-team-chat", payload);
         }
     });
@@ -970,14 +1001,19 @@ pub fn send_ping(
     sound: String,
     shape: String,
 ) -> Result<PingPayload, String> {
-    let (from_name, from_ip) = {
+    let (from_name, from_ip, from_peer_id) = {
         let guard = state.inner.lock().expect("network state poisoned");
-        (guard.display_name.clone(), guard.local_ip.clone())
+        (
+            guard.display_name.clone(),
+            guard.local_ip.clone(),
+            guard.local_peer_id.clone(),
+        )
     };
 
     let payload = PingPayload {
         from: from_name,
         from_ip,
+        from_peer_id,
         message,
         sound: if sound.trim().is_empty() {
             "chime".to_string()
@@ -1002,7 +1038,7 @@ pub fn send_ping(
 }
 
 pub fn send_team_chat(state: &NetworkingState, message: String) -> Result<ChatPayload, String> {
-    let (from_name, from_ip, peer_ips) = {
+    let (from_name, from_ip, from_peer_id, peer_ips) = {
         let guard = state.inner.lock().expect("network state poisoned");
         let ips = guard
             .peers
@@ -1010,13 +1046,19 @@ pub fn send_team_chat(state: &NetworkingState, message: String) -> Result<ChatPa
             .filter(|ip| **ip != guard.local_ip)
             .cloned()
             .collect::<Vec<_>>();
-        (guard.display_name.clone(), guard.local_ip.clone(), ips)
+        (
+            guard.display_name.clone(),
+            guard.local_ip.clone(),
+            guard.local_peer_id.clone(),
+            ips,
+        )
     };
 
     let payload = ChatPayload {
         kind: "team".to_string(),
         from: from_name,
         from_ip,
+        from_peer_id,
         to_ip: String::new(),
         message,
         timestamp: now_millis(),
@@ -1036,15 +1078,20 @@ pub fn send_private_chat(
     target_ip: String,
     message: String,
 ) -> Result<ChatPayload, String> {
-    let (from_name, from_ip) = {
+    let (from_name, from_ip, from_peer_id) = {
         let guard = state.inner.lock().expect("network state poisoned");
-        (guard.display_name.clone(), guard.local_ip.clone())
+        (
+            guard.display_name.clone(),
+            guard.local_ip.clone(),
+            guard.local_peer_id.clone(),
+        )
     };
 
     let payload = ChatPayload {
         kind: "private".to_string(),
         from: from_name,
         from_ip,
+        from_peer_id,
         to_ip: target_ip.clone(),
         message,
         timestamp: now_millis(),
