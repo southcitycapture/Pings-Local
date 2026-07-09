@@ -139,10 +139,10 @@ The plan originally called for rewriting networking onto a single tokio runtime 
   currently on the network — one click pings them with your default
   message/sound/shape and logs it to history just like a window ping — plus
   **Open Pings** and **Quit Pings**. The menu rebuilds as peers come and go.
-  Closing the main window now **hides** it to the menubar rather than quitting
-  (the presence-utility pattern); Quit from the tray to actually exit. Compiles
-  clean against Tauri 2.10; behavior needs on-device testing (a tray can't be
-  exercised headless).
+  Compiles clean against Tauri 2.10; behavior needs on-device testing (a tray
+  can't be exercised headless). Hide-to-menubar on window close is intentionally
+  deferred until the tray is confirmed rendering, so there's always an obvious
+  way to quit during first testing.
 
 Still to do in v3.2: global shortcut + the ⌘K command-palette window (ping
 without opening anything), and overlay quick-reply chips.

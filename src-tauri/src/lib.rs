@@ -271,17 +271,6 @@ pub fn run() {
             }
             Ok(())
         })
-        .on_window_event(|window, event| {
-            // A presence utility should live in the menubar: closing the main
-            // window hides it (Quit from the tray to actually exit). Other
-            // windows (DMs, options) close normally.
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
-            }
-        })
         .invoke_handler(tauri::generate_handler![
             health,
             migration_modules,
