@@ -152,8 +152,16 @@ The plan originally called for rewriting networking onto a single tokio runtime 
   selection, light/dark); the global-shortcut registration and window toggle need
   on-device testing.
 
-Still to do in v3.2: overlay quick-reply chips (one-tap responses on the
-incoming-ping flash).
+- **Quick-reply toast + Do Not Disturb.** On an incoming ping, a small
+  interactive card appears top-right (`src-tauri/src/toast.rs` +
+  `src/toast.*`) with the sender, their message, and one-tap quick replies
+  (from the `quickReplies` setting) that send a private chat back — separate
+  from the click-through border flash so the buttons are clickable. Shown and
+  focused from the main thread (the lesson from the double-click saga). This
+  also activates the long-dead **DND** setting: when on, it suppresses the
+  border flash, the toast, and the sound (the ping is still logged to
+  activity). Toast UI verified headless; window focus/positioning need
+  on-device confirmation. **v3.2 is complete** apart from that on-device check.
 
 ### v3.1 — Shell (the redesign lands)
 

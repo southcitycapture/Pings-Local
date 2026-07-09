@@ -116,3 +116,7 @@ export async function onSettingsUpdated(callback) {
 export function hidePalette() {
   return invoke("hide_palette");
 }
+
+export function hideToast() {
+  return invoke("hide_toast");
+}

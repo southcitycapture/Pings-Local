@@ -665,19 +665,40 @@ pub fn start_ping_listener(app: AppHandle, state: NetworkingState) {
 
             emit_peers_snapshot(&app, &state);
             emit_network_status(&app, &state);
-            overlay::show_ping_overlay(
-                &app,
-                &payload.from,
-                &payload.from_ip,
-                &payload.message,
-                &payload.sound,
-                &payload.shape,
-                payload.timestamp,
-            );
-            record_incoming_ping(&app, &payload);
-            let _ = app.emit("incoming-ping", payload);
+            deliver_incoming_ping(&app, payload);
         }
     });
+}
+
+/// Show the ping to the user (border flash + quick-reply toast, unless Do Not
+/// Disturb is on), record it to history, and forward it to the UI. Do Not
+/// Disturb suppresses the interruptive surfaces and the sound, but the ping is
+/// still logged and shown in the activity feed.
+fn deliver_incoming_ping(app: &AppHandle, payload: PingPayload) {
+    let dnd = crate::persistence::load_settings(app)
+        .map(|s| s.dnd)
+        .unwrap_or(false);
+    if !dnd {
+        overlay::show_ping_overlay(
+            app,
+            &payload.from,
+            &payload.from_ip,
+            &payload.message,
+            &payload.sound,
+            &payload.shape,
+            payload.timestamp,
+        );
+        crate::toast::show_ping_toast(
+            app,
+            &payload.from,
+            &payload.from_ip,
+            &payload.from_peer_id,
+            &payload.message,
+            payload.timestamp,
+        );
+    }
+    record_incoming_ping(app, &payload);
+    let _ = app.emit("incoming-ping", payload);
 }
 
 fn record_incoming_ping(app: &AppHandle, payload: &PingPayload) {
@@ -777,17 +798,7 @@ pub fn start_legacy_ping_listener(app: AppHandle, state: NetworkingState) {
 
                             emit_peers_snapshot(&app_for_emit, &state_for_emit);
                             emit_network_status(&app_for_emit, &state_for_emit);
-                            overlay::show_ping_overlay(
-                                &app_for_emit,
-                                &payload.from,
-                                &payload.from_ip,
-                                &payload.message,
-                                &payload.sound,
-                                &payload.shape,
-                                payload.timestamp,
-                            );
-                            record_incoming_ping(&app_for_emit, &payload);
-                            let _ = app_for_emit.emit("incoming-ping", payload);
+                            deliver_incoming_ping(&app_for_emit, payload);
                         }
                     });
                 }

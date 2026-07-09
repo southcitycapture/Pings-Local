@@ -3,6 +3,7 @@ mod overlay;
 mod palette;
 mod persistence;
 mod store;
+mod toast;
 mod tray;
 
 use serde::Serialize;
@@ -235,6 +236,11 @@ fn hide_palette(app: AppHandle) {
     palette::hide(&app);
 }
 
+#[tauri::command]
+fn hide_toast(app: AppHandle) {
+    toast::hide(&app);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let networking_state = NetworkingState::default();
@@ -319,7 +325,8 @@ pub fn run() {
             open_options_window,
             open_direct_chat_window,
             get_direct_chat_context,
-            hide_palette
+            hide_palette,
+            hide_toast
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
