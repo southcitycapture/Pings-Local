@@ -12,6 +12,9 @@ const MDNS_SERVICE_TYPE: &str = "_pings._tcp.local.";
 const PING_PORT: u16 = 43210;
 const CHAT_PORT: u16 = 43211;
 const PEER_STALE_MS: u64 = 900_000;
+/// How often we heartbeat known peers to keep presence fresh. Must stay well
+/// under the frontend's 120s "online" window.
+const HEARTBEAT_SECS: u64 = 30;
 
 #[derive(Clone, Default)]
 pub struct NetworkingState {
@@ -530,6 +533,51 @@ pub fn start_status_publisher(app: AppHandle, state: NetworkingState) {
     });
 }
 
+/// Send a presence heartbeat to a peer over the chat port. `ack=false` is a
+/// proactive heartbeat (the recipient acks it back); `ack=true` is that reply.
+/// Best-effort — a lost heartbeat just costs one skipped refresh.
+fn send_heartbeat(state: &NetworkingState, target_ip: &str, ack: bool) {
+    let (from_name, from_ip, from_peer_id) = {
+        let guard = state.lock_runtime();
+        (
+            guard.display_name.clone(),
+            guard.local_ip.clone(),
+            guard.local_peer_id.clone(),
+        )
+    };
+    let payload = ChatPayload {
+        id: String::new(),
+        kind: if ack { "heartbeat-ack" } else { "heartbeat" }.to_string(),
+        from: from_name,
+        from_ip,
+        from_peer_id,
+        to_ip: target_ip.to_string(),
+        message: String::new(),
+        timestamp: now_millis(),
+    };
+    if let Ok(socket) = UdpSocket::bind(("0.0.0.0", 0)) {
+        if let Ok(bytes) = serde_json::to_vec(&payload) {
+            let _ = socket.send_to(&bytes, (target_ip, CHAT_PORT));
+        }
+    }
+}
+
+/// Periodically heartbeat every known peer so nobody goes stale during a quiet
+/// stretch. Each heartbeat is acked, which also keeps *us* fresh in their lists
+/// and keeps agents (which don't browse for peers) alive purely via their acks.
+pub fn start_heartbeat_publisher(state: NetworkingState) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(HEARTBEAT_SECS));
+        let targets: Vec<String> = {
+            let guard = state.lock_runtime();
+            guard.peers.keys().cloned().collect()
+        };
+        for ip in targets {
+            send_heartbeat(&state, &ip, false);
+        }
+    });
+}
+
 pub fn start_mdns_discovery(app: AppHandle, state: NetworkingState) {
     {
         let mut guard = state.lock_runtime();
@@ -896,6 +944,20 @@ pub fn start_chat_listener(app: AppHandle, state: NetworkingState) {
 
             payload.from_ip = source_ip.clone();
             touch_peer(&state, &source_ip, &payload.from_peer_id, &payload.from);
+
+            // Presence heartbeat: keeps a peer from going stale/pruned during a
+            // quiet stretch (mDNS re-announcements with unchanged data don't
+            // refresh last_seen). A "heartbeat" is acked so the sender keeps *us*
+            // fresh too — agents, which don't browse for peers, stay in the list
+            // purely by acking the heartbeats we send them.
+            if payload.kind == "heartbeat" || payload.kind == "heartbeat-ack" {
+                emit_peers_snapshot(&app, &state);
+                emit_network_status(&app, &state);
+                if payload.kind == "heartbeat" {
+                    send_heartbeat(&state, &source_ip, true);
+                }
+                continue;
+            }
 
             // An ack confirms a private message we sent was delivered. Tell the
             // frontend and stop — acks are not messages and are not recorded.

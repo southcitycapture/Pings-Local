@@ -283,6 +283,7 @@ pub fn run() {
             networking::start_chat_listener(app.handle().clone(), networking_state.clone());
             networking::emit_network_status(app.handle(), &networking_state);
             networking::start_status_publisher(app.handle().clone(), networking_state.clone());
+            networking::start_heartbeat_publisher(networking_state.clone());
 
             // Menubar tray with per-peer quick-ping. It's kept in sync directly
             // from networking::emit_peers_snapshot as the peer list changes.

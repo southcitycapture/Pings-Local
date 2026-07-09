@@ -123,6 +123,25 @@ sock.on("message", async (buf, rinfo) => {
   }
   // Never reply to ourselves (our own reply / ack echoes back on loopback).
   if (msg.fromPeerId && msg.fromPeerId === PEER_ID) return;
+
+  // Presence heartbeat: ack it so the app keeps us in its buddy list during
+  // quiet stretches. We don't browse for peers, so we can't heartbeat first —
+  // we just ack whatever the app sends us.
+  if (msg.kind === "heartbeat") {
+    send(rinfo.address, {
+      id: "",
+      kind: "heartbeat-ack",
+      from: NAME,
+      fromIp: LOCAL_IP,
+      fromPeerId: PEER_ID,
+      toIp: rinfo.address,
+      message: "",
+      timestamp: Date.now(),
+    });
+    return;
+  }
+  if (msg.kind === "heartbeat-ack") return;
+
   if (msg.kind !== "private" || !msg.message) return;
 
   const from = rinfo.address; // the datagram source is authoritative
