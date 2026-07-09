@@ -5,7 +5,7 @@ mod store;
 mod tray;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Listener, State};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::networking::{network_interfaces, status_payload, NetworkingState};
 
@@ -260,16 +260,21 @@ pub fn run() {
             networking::emit_network_status(app.handle(), &networking_state);
             networking::start_status_publisher(app.handle().clone(), networking_state.clone());
 
-            // Menubar tray with per-peer quick-ping; rebuild it as peers change.
+            // Menubar tray with per-peer quick-ping. It's kept in sync directly
+            // from networking::emit_peers_snapshot as the peer list changes.
             tray::init(app.handle(), networking_state.clone())?;
-            {
-                let handle = app.handle().clone();
-                let tray_state = networking_state.clone();
-                app.handle().listen_any("peers-updated", move |_event| {
-                    tray::refresh(&handle, &tray_state);
-                });
-            }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Live in the menubar: closing the main window hides it (reopen via
+            // the tray's "Open Pings"; Cmd-Q or the tray's Quit still exits).
+            // Other windows (DMs, options) close normally.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             health,

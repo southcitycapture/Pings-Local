@@ -413,6 +413,9 @@ fn emit_peers_snapshot(app: &AppHandle, state: &NetworkingState) {
     let _ = app.emit("peers-updated", peers);
     let empty_chat_peers: Vec<serde_json::Value> = Vec::new();
     let _ = app.emit("chat-peers-updated", empty_chat_peers);
+    // Keep the tray's quick-ping menu in sync with the peer list. No-ops until
+    // the tray exists, and safe to call from any listener thread.
+    crate::tray::refresh(app, state);
 }
 
 pub fn set_preferred_ip(state: &NetworkingState, ip: String) -> NetworkStatusPayload {
