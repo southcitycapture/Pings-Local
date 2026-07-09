@@ -7,7 +7,7 @@ mod toast;
 mod tray;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::networking::{network_interfaces, status_payload, NetworkingState};
 
@@ -254,6 +254,16 @@ pub fn run() {
         .manage(networking_state.clone())
         .setup(move |app| {
             overlay::ensure_overlay_window(app.handle());
+
+            // Paint the main window's webview backing the theme ground color so
+            // it shows the app background instead of flashing white before the
+            // page paints its first frame.
+            if let Some(window) = app.get_webview_window("main") {
+                let dark = persistence::load_settings(app.handle())
+                    .map(|s| s.dark_mode)
+                    .unwrap_or(false);
+                overlay::paint_window_ground(&window, dark);
+            }
             if let Ok(settings) = persistence::load_settings(app.handle()) {
                 let _ = networking::set_preferred_ip(&networking_state, settings.preferred_ip);
                 let _ = networking::set_discovery_node_ip(
