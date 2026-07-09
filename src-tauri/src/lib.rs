@@ -2,9 +2,10 @@ mod networking;
 mod overlay;
 mod persistence;
 mod store;
+mod tray;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Listener, State};
 
 use crate::networking::{network_interfaces, status_payload, NetworkingState};
 
@@ -258,7 +259,28 @@ pub fn run() {
             networking::start_chat_listener(app.handle().clone(), networking_state.clone());
             networking::emit_network_status(app.handle(), &networking_state);
             networking::start_status_publisher(app.handle().clone(), networking_state.clone());
+
+            // Menubar tray with per-peer quick-ping; rebuild it as peers change.
+            tray::init(app.handle(), networking_state.clone())?;
+            {
+                let handle = app.handle().clone();
+                let tray_state = networking_state.clone();
+                app.handle().listen_any("peers-updated", move |_event| {
+                    tray::refresh(&handle, &tray_state);
+                });
+            }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // A presence utility should live in the menubar: closing the main
+            // window hides it (Quit from the tray to actually exit). Other
+            // windows (DMs, options) close normally.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             health,

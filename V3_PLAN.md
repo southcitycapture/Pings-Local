@@ -133,6 +133,20 @@ The plan originally called for rewriting networking onto a single tokio runtime 
 
 **v3.0 core is complete.**
 
+### v3.2 — the one-keystroke layer (in progress)
+
+- **Menubar tray with quick-ping.** A tray icon whose menu lists everyone
+  currently on the network — one click pings them with your default
+  message/sound/shape and logs it to history just like a window ping — plus
+  **Open Pings** and **Quit Pings**. The menu rebuilds as peers come and go.
+  Closing the main window now **hides** it to the menubar rather than quitting
+  (the presence-utility pattern); Quit from the tray to actually exit. Compiles
+  clean against Tauri 2.10; behavior needs on-device testing (a tray can't be
+  exercised headless).
+
+Still to do in v3.2: global shortcut + the ⌘K command-palette window (ping
+without opening anything), and overlay quick-reply chips.
+
 ### v3.1 — Shell (the redesign lands)
 
 The main window is now the buddy list from the mockup, built on the shared frontend core:
