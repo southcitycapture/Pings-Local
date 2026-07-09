@@ -16,9 +16,9 @@ pub fn toggle(app: &AppHandle) {
             }
         }
         None => {
-            // Built hidden; the palette UI reveals itself once painted (see
-            // core/enter.js) so there's no flash of an empty window.
-            let _ = build(app);
+            if let Ok(window) = build(app) {
+                reveal(&window);
+            }
         }
     }
 }

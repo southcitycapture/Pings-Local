@@ -86,23 +86,20 @@
   --shadow-md: 0 1px 2px rgba(23, 33, 30, 0.06), 0 8px 24px rgba(23, 33, 30, 0.08);
 }
 
-/* Window enter animation. Applied (via the .win-in class) only after the
- * window is shown, so content eases in instead of snapping. Without the class
- * the element renders normally — never leaves anything stuck invisible. */
+/* Window enter fade. Plays purely on load (no JS trigger) so content eases in
+ * over the window's themed background instead of snapping or flashing. */
 @keyframes window-enter {
   from {
     opacity: 0;
-    transform: translateY(6px);
   }
   to {
     opacity: 1;
-    transform: none;
   }
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .win-in {
-    animation: window-enter 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  .win-enter {
+    animation: window-enter 200ms ease-out both;
   }
 }
 

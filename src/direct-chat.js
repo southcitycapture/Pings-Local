@@ -10,7 +10,6 @@ import {
   onSettingsUpdated,
   sendPrivateChat,
 } from "./pings-api.js";
-import { revealWindow } from "./core/enter.js";
 
 const { listen } = window.__TAURI__.event;
 
@@ -335,5 +334,4 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
 
   renderMessages();
-  await revealWindow();
 });

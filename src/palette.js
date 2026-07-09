@@ -7,7 +7,6 @@ import {
   hidePalette,
 } from "./pings-api.js";
 import { normalizeIp, escapeHtml, initials, displayName, presenceState } from "./core/format.js";
-import { revealWindow } from "./core/enter.js";
 
 const { listen } = window.__TAURI__.event;
 
@@ -159,7 +158,6 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
 
   await reload();
-  await revealWindow();
   el.input.focus();
 
   await onPeersUpdated((payload) => {

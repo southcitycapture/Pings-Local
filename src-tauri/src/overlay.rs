@@ -106,6 +106,17 @@ pub fn show_ping_overlay(
     });
 }
 
+/// The app background color for the given theme, used as the native window
+/// background so a newly-created window shows a themed frame instead of a black
+/// flash before its webview paints.
+pub fn theme_ground(dark: bool) -> Color {
+    if dark {
+        Color(15, 21, 20, 255)
+    } else {
+        Color(245, 247, 246, 255)
+    }
+}
+
 pub fn open_options_window(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("options") {
         let _ = window.show();
@@ -113,12 +124,15 @@ pub fn open_options_window(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
+    let dark = crate::persistence::load_settings(app)
+        .map(|s| s.dark_mode)
+        .unwrap_or(false);
     WebviewWindowBuilder::new(app, "options", WebviewUrl::App("options.html".into()))
         .title("Pings Options")
         .inner_size(460.0, 700.0)
         .resizable(true)
         .always_on_top(false)
-        .visible(false)
+        .background_color(theme_ground(dark))
         .build()
         .map_err(|e| format!("open-options-window:{e}"))?;
 
@@ -212,13 +226,16 @@ pub fn open_direct_chat_window(
         return Ok(());
     }
 
+    let dark = crate::persistence::load_settings(app)
+        .map(|s| s.dark_mode)
+        .unwrap_or(false);
     WebviewWindowBuilder::new(app, &label, WebviewUrl::App("direct-chat.html".into()))
         .title(&title)
         .inner_size(420.0, 560.0)
         .min_inner_size(320.0, 420.0)
         .resizable(true)
         .always_on_top(false)
-        .visible(false)
+        .background_color(theme_ground(dark))
         .build()
         .map_err(|e| format!("open-direct-chat-window:{e}"))?;
 

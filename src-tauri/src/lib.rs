@@ -235,21 +235,6 @@ fn hide_palette(app: AppHandle) {
     palette::hide(&app);
 }
 
-/// Show the calling window. Windows are created hidden and reveal themselves via
-/// this once their content has painted, so there's no flash of an empty window.
-///
-/// The show/focus must run on the main thread: Tauri dispatches commands off the
-/// main thread, and macOS silently ignores window activation from a background
-/// thread — which left the window visible but not key, so the first click was
-/// swallowed just focusing it. Hopping to the main thread makes it key/active.
-#[tauri::command]
-fn show_self(app: AppHandle, window: tauri::WebviewWindow) {
-    let _ = app.run_on_main_thread(move || {
-        let _ = window.show();
-        let _ = window.set_focus();
-    });
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let networking_state = NetworkingState::default();
@@ -301,19 +286,13 @@ pub fn run() {
                 }
             }
 
-            // Safety net: the main window is created hidden and normally reveals
-            // itself once its UI has painted. If that never happens, show it
-            // anyway so the app can't get stuck with no visible window.
-            {
-                let handle = app.handle().clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(3000));
-                    if let Some(window) = handle.get_webview_window("main") {
-                        if !window.is_visible().unwrap_or(true) {
-                            let _ = window.show();
-                        }
-                    }
-                });
+            // Paint the main window's native background in the theme color so it
+            // doesn't flash black before the webview draws its first frame.
+            if let Some(window) = app.get_webview_window("main") {
+                let dark = persistence::load_settings(app.handle())
+                    .map(|s| s.dark_mode)
+                    .unwrap_or(false);
+                let _ = window.set_background_color(Some(overlay::theme_ground(dark)));
             }
             Ok(())
         })
@@ -348,8 +327,7 @@ pub fn run() {
             open_options_window,
             open_direct_chat_window,
             get_direct_chat_context,
-            hide_palette,
-            show_self
+            hide_palette
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
