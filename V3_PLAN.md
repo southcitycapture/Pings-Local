@@ -169,4 +169,6 @@ The main window is now the buddy list from the mockup, built on the shared front
 
 Verified by rendering the built UI headless (Chromium) with a mocked bridge and screenshotting light + dark, resting/hover, both drawer tabs, and the full onboarding flow through dismissal. That pass caught and fixed a real bug (the drawer's tab pills had no click handler).
 
-Still to do in v3.1: moving the remaining settings surface fully into one window.
+- **Settings consolidated into one window.** The Options window is rebuilt on the shared tokens (light/dark, no more CDN font or `body.dark`), and the profile **name** and default-ping **message** fields — which the main-window redesign had dropped — are recovered here, so Options is the single settings home. Ping-effect sliders show live values (opacity %, px, seconds).
+
+**v3.1 shell is complete.**

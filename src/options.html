@@ -10,46 +10,34 @@
   <body>
     <main class="options-wrap win-enter">
       <header>
-        <h1>Pings Settings</h1>
-        <p>Choose effects, sounds, profile photo, and appearance.</p>
+        <h1>Settings</h1>
+        <p>Your profile, ping effect, sounds, and appearance.</p>
       </header>
-
-      <section class="card">
-        <h2>App Updates</h2>
-        <button id="check-updates" type="button">Check for Updates</button>
-        <p id="update-status" class="muted-note">Check manually for a newer version of Pings.</p>
-      </section>
 
       <section class="card">
         <h2>Profile</h2>
         <div class="avatar-row">
           <img id="profile-avatar-preview" alt="Profile preview" class="avatar-preview" />
           <div class="avatar-actions">
-            <label class="file-label" for="profile-avatar-input">Choose Photo</label>
+            <label class="file-label" for="profile-avatar-input">Choose photo</label>
             <input id="profile-avatar-input" type="file" accept="image/*" />
-            <button id="clear-profile-avatar" type="button">Remove Photo</button>
+            <button id="clear-profile-avatar" type="button">Remove</button>
           </div>
         </div>
+        <label class="field">
+          Your name
+          <input id="profile-name" type="text" placeholder="e.g. Zach" autocomplete="off" />
+        </label>
       </section>
 
       <section class="card">
-        <h2>Appearance</h2>
-        <label class="checkbox-row"><input id="dark-mode" type="checkbox" /> Dark mode</label>
-      </section>
-
-      <section class="card">
-        <h2>Ping Effects</h2>
-        <label>Effect Color <input id="effect-color" type="color" /></label>
-        <label>Opacity <input id="effect-opacity" type="range" min="0.15" max="1" step="0.01" /></label>
-        <label>Border Thickness <input id="border-thickness" type="range" min="4" max="96" step="1" /></label>
-        <label>Feather <input id="effect-feather" type="range" min="6" max="96" step="1" /></label>
-        <label>Duration (ms) <input id="effect-duration-ms" type="range" min="350" max="4000" step="10" /></label>
-        <label class="checkbox-row"><input id="reduce-motion" type="checkbox" /> Reduce motion</label>
-      </section>
-
-      <section class="card">
-        <h2>Default Ping</h2>
-        <label>Sound
+        <h2>Default ping</h2>
+        <label class="field">
+          Message
+          <input id="custom-message" type="text" placeholder="e.g. Meeting in 5" autocomplete="off" />
+        </label>
+        <label class="field">
+          Sound
           <select id="sound">
             <option value="light">Light</option>
             <option value="chime">Chime</option>
@@ -60,7 +48,8 @@
             <option value="off">Off</option>
           </select>
         </label>
-        <label>Style
+        <label class="field">
+          Style
           <select id="ping-shape">
             <option value="circle">Circle</option>
             <option value="border">Border</option>
@@ -70,9 +59,47 @@
       </section>
 
       <section class="card">
-        <h2>Chat Sounds</h2>
+        <h2>Ping effect</h2>
+        <div class="field field-row">
+          <span class="field-label">Color</span>
+          <input id="effect-color" type="color" />
+        </div>
+        <div class="field field-row">
+          <span class="field-label">Opacity</span>
+          <span class="range-row">
+            <input id="effect-opacity" type="range" min="0.15" max="1" step="0.01" />
+            <span class="range-value" id="effect-opacity-value"></span>
+          </span>
+        </div>
+        <div class="field field-row">
+          <span class="field-label">Border thickness</span>
+          <span class="range-row">
+            <input id="border-thickness" type="range" min="4" max="96" step="1" />
+            <span class="range-value" id="border-thickness-value"></span>
+          </span>
+        </div>
+        <div class="field field-row">
+          <span class="field-label">Feather</span>
+          <span class="range-row">
+            <input id="effect-feather" type="range" min="6" max="96" step="1" />
+            <span class="range-value" id="effect-feather-value"></span>
+          </span>
+        </div>
+        <div class="field field-row">
+          <span class="field-label">Duration</span>
+          <span class="range-row">
+            <input id="effect-duration-ms" type="range" min="350" max="4000" step="10" />
+            <span class="range-value" id="effect-duration-ms-value"></span>
+          </span>
+        </div>
+        <label class="checkbox-row"><input id="reduce-motion" type="checkbox" /> Reduce motion</label>
+      </section>
+
+      <section class="card">
+        <h2>Chat sounds</h2>
         <label class="checkbox-row"><input id="chat-sounds-enabled" type="checkbox" /> Play chat sounds</label>
-        <label>Sent message sound
+        <label class="field">
+          Sent message
           <select id="chat-send-sound">
             <option value="tap">Tap</option>
             <option value="light">Light</option>
@@ -83,7 +110,8 @@
             <option value="off">Off</option>
           </select>
         </label>
-        <label>Received message sound
+        <label class="field">
+          Received message
           <select id="chat-receive-sound">
             <option value="bubble">Bubble</option>
             <option value="light">Light</option>
@@ -94,6 +122,17 @@
             <option value="off">Off</option>
           </select>
         </label>
+      </section>
+
+      <section class="card">
+        <h2>Appearance</h2>
+        <label class="checkbox-row"><input id="dark-mode" type="checkbox" /> Dark mode</label>
+      </section>
+
+      <section class="card">
+        <h2>Updates</h2>
+        <button id="check-updates" type="button">Check for updates</button>
+        <p id="update-status" class="muted-note">Check manually for a newer version of Pings.</p>
       </section>
 
       <pre id="status">Loading...</pre>
