@@ -246,12 +246,18 @@ pub fn run() {
     let networking_state = NetworkingState::default();
     networking::initialize_state(&networking_state);
 
-    tauri::Builder::default()
-        .plugin(tauri_nspanel::init())
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build());
+
+    // The non-activating toast panel is macOS-only (AppKit NSPanel). On other
+    // platforms the toast falls back to a normal window (see toast.rs).
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_nspanel::init());
+
+    builder
         .manage(networking_state.clone())
         .setup(move |app| {
             overlay::ensure_overlay_window(app.handle());
