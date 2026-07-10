@@ -1,12 +1,15 @@
 # Pings
 
 > **See who's around. Ping them in one keystroke.**
+>
+> **Beta 0.3.5** — macOS is the primary build; a Linux build is in beta.
 
-Pings is a lightweight **presence utility** for macOS that lives in your
-menubar. It shows everyone on your local network and lets you get someone's
-attention instantly — a full-screen flash of colour on *their* screen — without
-a chat app, an account, or a server in the middle. Everything travels directly,
-peer-to-peer, over your LAN.
+Pings is a lightweight **presence utility** that lives in your menubar. It shows
+everyone on your local network and lets you get someone's attention instantly — a
+full-screen flash of colour on *their* screen — without a chat app, an account,
+or a server in the middle. Everything travels directly, peer-to-peer, over your
+LAN. macOS is the primary target (Apple Silicon + Intel); Linux is now building
+in beta, with macOS features flowing into it as they land.
 
 <p align="center">
   <img src="docs/images/buddy-list.png" alt="Pings buddy list" width="360">
@@ -62,7 +65,9 @@ before installing.
 ## How it works
 
 - Built on **[Tauri](https://tauri.app)** — a Rust core with a web UI — macOS
-  first (Apple Silicon + Intel).
+  first (Apple Silicon + Intel), with a Linux build (`.deb` / `.AppImage` /
+  `.rpm`) in beta. The macOS-only bits (the non-activating NSPanel toast) are
+  cfg-gated and fall back to a normal window elsewhere.
 - **No servers, no cloud, no accounts.** Peers are discovered on your LAN via
   **mDNS/Bonjour**; pings and messages travel directly over **UDP**.
 - **Stable identity:** every peer has a persistent `peerId`, so aliases, history,
@@ -73,7 +78,8 @@ before installing.
 
 ## Status
 
-**Feature-complete.** The full v3 line is built and verified on real hardware:
+**Beta 0.3.5.** The full v3 line is built and verified on real Mac hardware, and
+a Linux build is now in beta testing:
 
 | Phase | What |
 |-------|------|
@@ -82,8 +88,11 @@ before installing.
 | v3.2 | tray quick-ping, global shortcut, ⌘K palette, overlay v2, DND, onboarding |
 | v3.3 | agent peers + reference bridge + published protocol |
 | v3.4 | signed HTTPS updater, real CSP, packaging |
+| Linux (beta) | cross-platform build — macOS-only NSPanel cfg-gated, `.deb`/`.AppImage`/`.rpm` in CI |
 
-Linux and Windows are a planned future port.
+macOS is the primary build; the Linux beta follows behind, picking up macOS
+features as they stabilise. Linux auto-update isn't wired yet — beta testers
+re-download new builds for now. Windows is a possible future port.
 
 ## Install it on a machine
 
@@ -114,14 +123,44 @@ The `--config` flag skips the signed-updater artifacts (which need the release
 signing key), so no key is required for a local install. To just run it without
 installing, use `npm run tauri dev`.
 
-### Download a release (once one is published)
+### Linux (beta)
 
-When a signed release is cut (see [Building a release](#building-a-release)),
-installing becomes a plain download — no toolchain needed:
+The Linux build is in beta. Grab a `.deb`, `.AppImage`, or `.rpm` from a
+published release, or build it yourself. Building needs [Rust](https://rustup.rs),
+Node 18+, and the WebKitGTK / GTK system libraries:
 
 ```bash
+# Debian/Ubuntu system deps
+sudo apt-get install -y \
+  libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+  librsvg2-dev libssl-dev libxdo-dev build-essential curl wget file patchelf
+
+# pull, build, install
+git clone https://github.com/southcitycapture/Pings-Local.git
+cd Pings-Local
+npm install
+npm run tauri build -- --config '{"bundle":{"createUpdaterArtifacts":false}}'
+# installers land in src-tauri/target/release/bundle/{deb,appimage,rpm}/
+```
+
+The quick-reply toast falls back to a normal always-on-top window on Linux (the
+non-activating panel is macOS-only); everything else — discovery, the attention
+flash, chat, agents — works the same.
+
+### Download a release (once one is published)
+
+When a release is cut (see [Building a release](#building-a-release)), installing
+becomes a plain download — no toolchain needed. Grab the `.dmg` on macOS, or the
+`.deb` / `.AppImage` / `.rpm` on Linux:
+
+```bash
+# macOS
 gh release download --repo southcitycapture/Pings-Local --pattern "*.dmg"
 open Pings_*.dmg     # right-click → Open on first launch until notarized
+
+# Linux (pick your format)
+gh release download --repo southcitycapture/Pings-Local --pattern "*.AppImage"
+chmod +x Pings_*.AppImage && ./Pings_*.AppImage
 ```
 
 ## Getting started (development)
@@ -138,9 +177,11 @@ on one machine, see [agent-bridge](./agent-bridge).
 
 ### Building a release
 
-Releases are built and signed by CI on a version tag — see
+Releases are built by CI on a version tag — see
 [UPDATER_SETUP.md](./UPDATER_SETUP.md). In short: bump the version, push a `v*`
-tag, and GitHub Actions produces a signed `.dmg` and the auto-update manifest.
+tag, and GitHub Actions builds a `macOS + Linux` matrix into a **draft** release —
+a signed universal `.dmg` (with the macOS auto-update manifest) plus Linux
+`.deb` / `.AppImage` / `.rpm`.
 
 ## Docs
 
