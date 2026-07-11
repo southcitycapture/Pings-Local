@@ -130,6 +130,28 @@
       </section>
 
       <section class="card">
+        <h2>Network</h2>
+        <label class="checkbox-row">
+          <input id="prefer-overlay" type="checkbox" /> Prefer overlay network (Tailscale / VPN)
+        </label>
+        <label class="field">
+          Add peers by IP
+          <textarea
+            id="manual-peers"
+            rows="4"
+            placeholder="One address per line, e.g. 100.101.102.103"
+            spellcheck="false"
+            autocomplete="off"
+          ></textarea>
+        </label>
+        <p class="muted-note">
+          For people discovery can't see — other subnets, offices, or a tailnet.
+          Tailscale IPs (100.x.y.z) work great. Restart Pings after changing
+          these so it re-announces from the right address.
+        </p>
+      </section>
+
+      <section class="card">
         <h2>Updates</h2>
         <button id="check-updates" type="button">Check for updates</button>
         <p id="update-status" class="muted-note">Check manually for a newer version of Pings.</p>

@@ -14,11 +14,11 @@ use crate::networking::{network_interfaces, status_payload, NetworkingState};
 fn get_network_interfaces(
     state: State<'_, NetworkingState>,
 ) -> Vec<networking::NetworkInterfaceInfo> {
-    let preferred_ip = {
+    let (preferred_ip, prefer_overlay) = {
         let guard = state.lock_runtime();
-        guard.preferred_ip.clone()
+        (guard.preferred_ip.clone(), guard.prefer_overlay)
     };
-    network_interfaces(&preferred_ip)
+    network_interfaces(&preferred_ip, prefer_overlay)
 }
 
 #[tauri::command]
@@ -62,10 +62,23 @@ fn get_settings(app: AppHandle) -> Result<persistence::Settings, String> {
 #[tauri::command]
 fn update_setting(
     app: AppHandle,
+    state: State<'_, NetworkingState>,
     key: String,
     value: serde_json::Value,
 ) -> Result<persistence::Settings, String> {
-    let settings = persistence::update_setting(&app, key, value)?;
+    let settings = persistence::update_setting(&app, key.clone(), value)?;
+    // Network preferences must reach the live networking state, not just disk.
+    match key.as_str() {
+        "manualPeers" => {
+            networking::set_manual_peers(&app, &state, settings.manual_peers.clone());
+        }
+        "preferOverlayInterface" => {
+            let _ = networking::set_prefer_overlay(&state, settings.prefer_overlay_interface);
+            networking::emit_network_status(&app, &state);
+            networking::emit_peer_resets(&app);
+        }
+        _ => {}
+    }
     let _ = app.emit("settings-updated", settings.clone());
     Ok(settings)
 }
@@ -231,10 +244,19 @@ pub fn run() {
                 overlay::paint_window_ground(&window, dark);
             }
             if let Ok(settings) = persistence::load_settings(app.handle()) {
+                let _ = networking::set_prefer_overlay(
+                    &networking_state,
+                    settings.prefer_overlay_interface,
+                );
                 let _ = networking::set_preferred_ip(&networking_state, settings.preferred_ip);
                 let _ = networking::set_discovery_node_ip(
                     &networking_state,
                     settings.discovery_node_ip,
+                );
+                networking::set_manual_peers(
+                    app.handle(),
+                    &networking_state,
+                    settings.manual_peers,
                 );
             }
             if let Ok(profile) = persistence::load_profile_ensure_peer_id(app.handle()) {

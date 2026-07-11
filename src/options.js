@@ -19,6 +19,8 @@ const fields = {
   chatSendSound: document.getElementById("chat-send-sound"),
   chatReceiveSound: document.getElementById("chat-receive-sound"),
   customMessage: document.getElementById("custom-message"),
+  preferOverlay: document.getElementById("prefer-overlay"),
+  manualPeers: document.getElementById("manual-peers"),
   profileName: document.getElementById("profile-name"),
   avatarInput: document.getElementById("profile-avatar-input"),
   avatarPreview: document.getElementById("profile-avatar-preview"),
@@ -161,6 +163,11 @@ function applyToInputs(settings) {
   fields.chatSendSound.value = settings.chatSendSound || "tap";
   fields.chatReceiveSound.value = settings.chatReceiveSound || "bubble";
   fields.customMessage.value = settings.customMessage || "";
+  fields.preferOverlay.checked = Boolean(settings.preferOverlayInterface);
+  // Don't clobber the textarea mid-edit: only sync it when unfocused.
+  if (document.activeElement !== fields.manualPeers) {
+    fields.manualPeers.value = (settings.manualPeers || []).join("\n");
+  }
   ["effectOpacity", "borderThickness", "effectFeather", "effectDurationMs"].forEach(updateRangeLabel);
   applyTheme(settings);
 }
@@ -230,6 +237,18 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   fields.customMessage.addEventListener("change", () =>
     saveSetting("customMessage", fields.customMessage.value.trim()),
+  );
+  fields.preferOverlay.addEventListener("change", () =>
+    saveSetting("preferOverlayInterface", fields.preferOverlay.checked),
+  );
+  fields.manualPeers.addEventListener("change", () =>
+    saveSetting(
+      "manualPeers",
+      fields.manualPeers.value
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean),
+    ),
   );
   fields.profileName.addEventListener("change", async () => {
     await saveProfile({ ...(profileCache || {}), displayName: fields.profileName.value.trim() });

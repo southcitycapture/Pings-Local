@@ -16,6 +16,12 @@ pub struct Settings {
     pub ping_shape: String,
     pub preferred_ip: String,
     pub discovery_node_ip: String,
+    /// "Add by IP": peers reached by address where discovery can't see them
+    /// (other subnets, tailnets). Fed into the peer table alongside mDNS.
+    pub manual_peers: Vec<String>,
+    /// Prefer overlay interfaces (Tailscale/WireGuard) when picking the local
+    /// address, so Pings advertises its tailnet IP instead of the LAN one.
+    pub prefer_overlay_interface: bool,
     pub peer_sounds: HashMap<String, String>,
     pub peer_aliases: HashMap<String, String>,
     pub quick_replies: Vec<String>,
@@ -58,6 +64,8 @@ impl Default for Settings {
             ping_shape: "circle".to_string(),
             preferred_ip: String::new(),
             discovery_node_ip: String::new(),
+            manual_peers: Vec::new(),
+            prefer_overlay_interface: false,
             peer_sounds: HashMap::new(),
             peer_aliases: HashMap::new(),
             quick_replies: vec![
@@ -164,6 +172,16 @@ pub fn update_setting(app: &AppHandle, key: String, value: Value) -> Result<Sett
         "discoveryNodeIp" => {
             if let Some(v) = value.as_str() {
                 settings.discovery_node_ip = v.to_string();
+            }
+        }
+        "manualPeers" => {
+            if let Ok(parsed) = serde_json::from_value::<Vec<String>>(value.clone()) {
+                settings.manual_peers = parsed.into_iter().take(64).collect();
+            }
+        }
+        "preferOverlayInterface" => {
+            if let Some(v) = value.as_bool() {
+                settings.prefer_overlay_interface = v;
             }
         }
         "peerSounds" => {

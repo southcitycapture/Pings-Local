@@ -22,22 +22,26 @@ unchanged.
 
 ## Phase D0 — client seams (ships in a free Pings point-release)
 
+> Status: **built** (Add-by-IP + overlay preference; verified headless, needs
+> the usual on-device pass). Two items moved to D1 deliberately: the formal
+> `DiscoverySource` trait (a static list turned out to be a re-seed loop, not
+> a source — the trait earns its keep when the *server* source arrives) and
+> wiring `discovery_node_ip` (it becomes the Dispatch URL field).
+
 Small, free-tier-safe changes that make the desktop app Dispatch-ready and are
 useful on their own:
 
-- **Discovery-source abstraction.** Refactor `start_mdns_discovery` behind a
-  `DiscoverySource` trait; mDNS becomes the first implementation. Pure
-  refactor, no behavior change.
-- **"Add by IP" (static source).** A manual peer list in Options (IP or
-  MagicDNS name). This is DISCOVERY-SERVER.md's "cheapest first step" — it
-  makes two laptops on a tailnet work *today*, no server, and it's the escape
-  hatch forever.
-- **Tailscale-friendly interface pick.** A "prefer overlay interface" toggle
-  that flips the current `interface_penalty` bias so the app advertises its
-  `100.x` address. (The detection code already exists — it currently
-  penalizes exactly what this prefers.)
-- **Wire the vestigial `discovery_node_ip` setting** to the new source enum
-  (it's been a stored-but-dead stub since v2).
+- **"Add by IP" (static source).** A manual peer list in Options (one IPv4
+  per line — MagicDNS names deferred so unresolved names can't become ghost
+  rows). Entries join the peer table immediately, are exempt from
+  stale-pruning, and the existing heartbeat/ack cycle fills in their real
+  name/peerId and keeps presence honest. This is DISCOVERY-SERVER.md's
+  "cheapest first step" — two laptops on a tailnet work *today*, no server,
+  and it's the escape hatch forever.
+- **Tailscale-friendly interface pick.** A "prefer overlay network" toggle
+  that flips the `interface_penalty`/CGNAT bias so the app advertises its
+  `100.x` address. (The detection code already existed — it penalized exactly
+  what this prefers.)
 
 **Verify:** two machines, mDNS off, static list over a tailnet — ping + chat +
 acks round-trip. This phase alone closes the "two offices, small team" gap for
