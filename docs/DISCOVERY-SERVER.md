@@ -1,7 +1,9 @@
 # Future direction: a Pings discovery server (and Tailscale mode)
 
-> Status: **idea / not scheduled.** Captured so we don't forget it. Nothing here
-> is built yet.
+> Status: **absorbed into the product plan.** This idea grew into **Pings
+> Dispatch** — see [PRODUCT-LINE.md](./PRODUCT-LINE.md) for the product tiers
+> and [DISPATCH-PLAN.md](./DISPATCH-PLAN.md) for the phased build (this
+> document is the technical seed for phase D1). Nothing here is built yet.
 
 ## The premise
 
