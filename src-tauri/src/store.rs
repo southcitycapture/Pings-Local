@@ -6,15 +6,18 @@
 //! activity actually survives, and the redesigned activity drawer / DM windows
 //! can load from it.
 //!
-//! Connections are opened per call. SQLite is a local file and event volume is
-//! human-paced (a handful of pings), so the open cost is irrelevant; WAL mode
-//! plus a busy timeout keeps the listener threads and command handlers from
-//! stepping on each other.
+//! One connection is opened lazily and kept for the app's lifetime behind a
+//! mutex — event volume is human-paced, so a single serialized connection is
+//! plenty, and it avoids re-opening the file and re-running the schema DDL on
+//! every insert. WAL mode plus a busy timeout keep any external readers happy.
 
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
+
+static DB: Mutex<Option<Connection>> = Mutex::new(None);
 
 /// A single recorded ping or chat message.
 #[derive(Clone, Serialize)]
@@ -81,10 +84,19 @@ fn init(conn: &Connection) -> rusqlite::Result<()> {
     )
 }
 
-fn open(app: &AppHandle) -> Result<Connection, String> {
-    let conn = Connection::open(db_path(app)?).map_err(|e| format!("history-open:{e}"))?;
-    init(&conn).map_err(|e| format!("history-migrate:{e}"))?;
-    Ok(conn)
+/// Run `f` against the shared connection, opening (and migrating) it on first
+/// use. A poisoned lock is recovered — the connection itself stays valid.
+fn with_db<T>(
+    app: &AppHandle,
+    f: impl FnOnce(&Connection) -> rusqlite::Result<T>,
+) -> Result<T, String> {
+    let mut guard = DB.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if guard.is_none() {
+        let conn = Connection::open(db_path(app)?).map_err(|e| format!("history-open:{e}"))?;
+        init(&conn).map_err(|e| format!("history-migrate:{e}"))?;
+        *guard = Some(conn);
+    }
+    f(guard.as_ref().expect("db connection just initialized")).map_err(|e| format!("history:{e}"))
 }
 
 fn insert(conn: &Connection, event: &HistoryEvent) -> rusqlite::Result<()> {
@@ -131,20 +143,15 @@ fn select(conn: &Connection, limit: u32) -> rusqlite::Result<Vec<HistoryEvent>> 
 /// Persist one event. Failures are returned to the caller, which logs rather
 /// than aborts — a dropped history row must never break message delivery.
 pub fn record(app: &AppHandle, event: &HistoryEvent) -> Result<(), String> {
-    let conn = open(app)?;
-    insert(&conn, event).map_err(|e| format!("history-insert:{e}"))
+    with_db(app, |conn| insert(conn, event))
 }
 
 pub fn history(app: &AppHandle, limit: u32) -> Result<Vec<HistoryEvent>, String> {
-    let conn = open(app)?;
-    select(&conn, limit).map_err(|e| format!("history-query:{e}"))
+    with_db(app, |conn| select(conn, limit))
 }
 
 pub fn clear(app: &AppHandle) -> Result<(), String> {
-    let conn = open(app)?;
-    conn.execute("DELETE FROM events", [])
-        .map_err(|e| format!("history-clear:{e}"))?;
-    Ok(())
+    with_db(app, |conn| conn.execute("DELETE FROM events", []).map(|_| ()))
 }
 
 #[cfg(test)]

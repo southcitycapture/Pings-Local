@@ -10,6 +10,8 @@ import {
   onSettingsUpdated,
   sendPrivateChat,
 } from "./pings-api.js";
+import { escapeHtml, formatAgo, initials } from "./core/format.js";
+import { playSound } from "./core/sound.js";
 
 const { listen } = window.__TAURI__.event;
 
@@ -19,7 +21,6 @@ let messages = [];
 let seenIncomingMessageKeys = new Set();
 let cachedSettings = null;
 let lastSettingsFetch = 0;
-let audioContext = null;
 
 function applyTheme(settings = {}) {
   document.documentElement.setAttribute("data-theme", settings?.darkMode ? "dark" : "light");
@@ -41,30 +42,6 @@ function decodePeerIpFromLabel() {
   return raw.replace(/_/g, ".");
 }
 
-function escapeHtml(text = "") {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-function formatAgo(ts) {
-  if (!ts) return "now";
-  const sec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  return `${Math.floor(min / 60)}h ago`;
-}
-
-function getInitials(nameOrIp) {
-  const text = String(nameOrIp || "DM").trim();
-  const parts = text.split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) {
-    return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase();
-  }
-  return text.slice(0, 2).toUpperCase();
-}
-
 function renderHeader() {
   const nameEl = document.getElementById("peer-name");
   const metaEl = document.getElementById("peer-meta");
@@ -72,7 +49,7 @@ function renderHeader() {
   const label = peerName || peerIp || "Direct Message";
   nameEl.textContent = label;
   metaEl.textContent = peerIp ? `${peerIp} · online` : "Waiting for peer info...";
-  avatarEl.textContent = getInitials(label);
+  avatarEl.textContent = initials(label);
 }
 
 function renderMessages() {
@@ -110,59 +87,6 @@ function incomingMessageKey(payload) {
   ].join("|");
 }
 
-function getAudioContext() {
-  if (!audioContext) {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (Ctx) {
-      audioContext = new Ctx();
-    }
-  }
-  return audioContext;
-}
-
-function playTone(freq = 800, type = "sine", duration = 0.12, gainValue = 0.24) {
-  const ctx = getAudioContext();
-  if (!ctx) return;
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  osc.type = type;
-  osc.frequency.value = freq;
-  gain.gain.value = 0;
-  osc.connect(gain);
-  gain.connect(ctx.destination);
-  const now = ctx.currentTime;
-  gain.gain.linearRampToValueAtTime(gainValue, now + 0.02);
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-  osc.start(now);
-  osc.stop(now + duration);
-}
-
-function playSound(rawSound) {
-  const sound = String(rawSound || "light").toLowerCase();
-  if (sound === "off") return;
-  if (sound === "light") {
-    playTone(980, "sine", 0.1, 0.14);
-    return;
-  }
-  if (sound === "bubble") {
-    playTone(720, "sine", 0.11, 0.18);
-    return;
-  }
-  if (sound === "tap") {
-    playTone(1350, "square", 0.05, 0.16);
-    return;
-  }
-  if (sound === "bell") {
-    playTone(620, "triangle", 0.22, 0.2);
-    return;
-  }
-  if (sound === "drop") {
-    playTone(340, "sine", 0.13, 0.2);
-    return;
-  }
-  playTone(1140, "sine", 0.14, 0.24);
-}
-
 async function getLiveSettings() {
   if (cachedSettings && Date.now() - lastSettingsFetch < 1500) {
     return cachedSettings;
@@ -187,9 +111,10 @@ async function maybePlayChatSound(kind) {
   playSound(settings.chatReceiveSound || "bubble");
 }
 
-async function refreshPeerIdentity() {
-  const peers = await getPeers();
-  const list = Array.isArray(peers) ? peers : [];
+// Track this DM's peer across IP/name changes. `peersList` is the payload the
+// peers-updated event already carries — no extra round-trip to the backend.
+function refreshPeerIdentity(peersList) {
+  const list = Array.isArray(peersList) ? peersList : [];
   if (!peerIp && !peerName) return;
 
   let peer = list.find((p) => p?.ip === peerIp);
@@ -282,7 +207,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   await listen("direct-chat-context", async (event) => {
     applyContext(event.payload || {});
-    await refreshPeerIdentity();
+    refreshPeerIdentity(await getPeers());
   });
 
   await bootstrapContextFromBackend();
@@ -323,8 +248,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  await onPeersUpdated(async () => {
-    await refreshPeerIdentity();
+  await onPeersUpdated((peersList) => {
+    refreshPeerIdentity(peersList);
   });
 
   await onSettingsUpdated((nextSettings) => {

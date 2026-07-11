@@ -6,38 +6,9 @@ mod store;
 mod toast;
 mod tray;
 
-use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::networking::{network_interfaces, status_payload, NetworkingState};
-
-#[derive(Serialize)]
-struct HealthPayload {
-    app: &'static str,
-    phase: &'static str,
-    platform: String,
-}
-
-#[tauri::command]
-fn health() -> HealthPayload {
-    HealthPayload {
-        app: "Pings",
-        phase: "v2-migration",
-        platform: std::env::consts::OS.to_string(),
-    }
-}
-
-#[tauri::command]
-fn migration_modules() -> Vec<&'static str> {
-    vec![
-        "networking-service",
-        "tray-and-menu",
-        "overlay-alert-window",
-        "group-chat",
-        "private-chat-floating-windows",
-        "profile-and-settings-persistence",
-    ]
-}
 
 #[tauri::command]
 fn get_network_interfaces(
@@ -126,6 +97,26 @@ fn clear_history(app: AppHandle) -> Result<(), String> {
     store::clear(&app)
 }
 
+/// Record an outgoing ping/chat to history, resolving the recipient's stable
+/// identity and display name from the peer list when known.
+pub(crate) fn record_outgoing(
+    app: &AppHandle,
+    kind: &str,
+    target: Option<&networking::PeerInfo>,
+    target_ip: &str,
+    message: &str,
+    timestamp: u64,
+) {
+    let peer_id = target.map(|p| p.peer_id.clone()).unwrap_or_default();
+    let peer_name = target
+        .map(|p| p.name.clone())
+        .unwrap_or_else(|| target_ip.to_string());
+    let _ = store::record(
+        app,
+        &store::HistoryEvent::new(kind, "out", peer_id, target_ip, peer_name, message, timestamp),
+    );
+}
+
 #[tauri::command]
 fn send_ping(
     app: AppHandle,
@@ -144,23 +135,7 @@ fn send_ping(
         sound.unwrap_or_else(|| "chime".to_string()),
         shape.unwrap_or_else(|| "circle".to_string()),
     )?;
-    let peer_id = target.as_ref().map(|p| p.peer_id.clone()).unwrap_or_default();
-    let peer_name = target
-        .as_ref()
-        .map(|p| p.name.clone())
-        .unwrap_or_else(|| target_ip.clone());
-    let _ = store::record(
-        &app,
-        &store::HistoryEvent::new(
-            "ping",
-            "out",
-            peer_id,
-            target_ip,
-            peer_name,
-            payload.message.clone(),
-            payload.timestamp,
-        ),
-    );
+    record_outgoing(&app, "ping", target.as_ref(), &target_ip, &payload.message, payload.timestamp);
     Ok(payload)
 }
 
@@ -196,23 +171,7 @@ fn send_private_chat(
     let target = networking::peer_by_ip(&state, &ip);
     let target_ip = ip.clone();
     let payload = networking::send_private_chat(&state, ip, message)?;
-    let peer_id = target.as_ref().map(|p| p.peer_id.clone()).unwrap_or_default();
-    let peer_name = target
-        .as_ref()
-        .map(|p| p.name.clone())
-        .unwrap_or_else(|| target_ip.clone());
-    let _ = store::record(
-        &app,
-        &store::HistoryEvent::new(
-            "chat",
-            "out",
-            peer_id,
-            target_ip,
-            peer_name,
-            payload.message.clone(),
-            payload.timestamp,
-        ),
-    );
+    record_outgoing(&app, "chat", target.as_ref(), &target_ip, &payload.message, payload.timestamp);
     Ok(payload)
 }
 
@@ -324,8 +283,6 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            health,
-            migration_modules,
             get_network_interfaces,
             get_network_status,
             get_peers,

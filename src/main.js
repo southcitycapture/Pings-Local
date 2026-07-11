@@ -17,7 +17,6 @@ import {
   openOptionsWindow,
   openDirectChatWindow,
 } from "./pings-api.js";
-import { io } from "socket.io-client";
 import {
   normalizeIp,
   escapeHtml,
@@ -352,7 +351,10 @@ async function messagePeer(row) {
 }
 
 // Legacy socket.io ping, sent only to reach v1 (Electron) peers with no peerId.
-function sendLegacyPing(ip, message, sound, shape) {
+// socket.io-client is loaded on demand so it stays out of the startup bundle —
+// most sessions never ping a v1 peer.
+async function sendLegacyPing(ip, message, sound, shape) {
+  const { io } = await import("socket.io-client");
   return new Promise((resolve) => {
     const socket = io(`http://${ip}:43210`, {
       timeout: 1200,
