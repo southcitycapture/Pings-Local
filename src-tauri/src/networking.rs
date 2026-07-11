@@ -129,6 +129,13 @@ pub struct NetworkRuntime {
     pub discovery_node_ip: String,
     pub local_ip: String,
     pub peers: HashMap<String, PeerInfo>,
+    /// "Add by IP" entries: peers reached by address where discovery can't see
+    /// them (other subnets, tailnets). Exempt from stale-pruning and re-seeded
+    /// into `peers` if a network reset clears them.
+    pub manual_peers: Vec<String>,
+    /// Prefer overlay interfaces (Tailscale/WireGuard) when picking the local
+    /// address — see `interface_score`.
+    pub prefer_overlay: bool,
     /// Every IPv4 assigned to this machine (plus loopback), cached so packet
     /// handlers can drop self-traffic with a set lookup instead of re-running
     /// interface enumeration per packet. Refreshed by the status publisher.
@@ -151,7 +158,7 @@ impl NetworkRuntime {
     /// Re-enumerate the machine's interfaces into the cache. The only place
     /// that pays the getifaddrs syscall cost.
     fn refresh_local_ips(&mut self) {
-        self.local_ips = network_interfaces(&self.preferred_ip)
+        self.local_ips = network_interfaces(&self.preferred_ip, self.prefer_overlay)
             .into_iter()
             .map(|i| normalize_ip(&i.address))
             .collect();
@@ -257,7 +264,30 @@ fn interface_penalty(name: &str) -> i32 {
     0
 }
 
-pub fn network_interfaces(preferred_ip: &str) -> Vec<NetworkInterfaceInfo> {
+/// Rank an interface (lower = better). Normally overlay interfaces
+/// (Tailscale/WireGuard) and CGNAT `100.x` addresses are penalized — for a LAN
+/// that's the right call. In overlay mode the tailnet address *is* the
+/// identity we want to advertise, so the same signals become preferences.
+fn interface_score(name: &str, ip: &str, prefer_overlay: bool) -> i32 {
+    let mut score = 100;
+    if is_private_ipv4(ip) {
+        score -= 60;
+    }
+    if prefer_overlay {
+        if is_carrier_grade_nat_ipv4(ip) {
+            score -= 80;
+        }
+        score -= interface_penalty(name);
+    } else {
+        if is_carrier_grade_nat_ipv4(ip) {
+            score += 20;
+        }
+        score += interface_penalty(name);
+    }
+    score
+}
+
+pub fn network_interfaces(preferred_ip: &str, prefer_overlay: bool) -> Vec<NetworkInterfaceInfo> {
     let mut list = Vec::new();
     for iface in if_addrs::get_if_addrs().unwrap_or_default() {
         if iface.is_loopback() {
@@ -268,27 +298,19 @@ pub fn network_interfaces(preferred_ip: &str) -> Vec<NetworkInterfaceInfo> {
             if_addrs::IfAddr::V6(_) => continue,
         };
         let normalized = normalize_ip(&ip);
-        let mut score = 100;
-        if is_private_ipv4(&normalized) {
-            score -= 60;
-        }
-        if is_carrier_grade_nat_ipv4(&normalized) {
-            score += 20;
-        }
-        score += interface_penalty(&iface.name);
         list.push(NetworkInterfaceInfo {
-            name: iface.name,
-            address: normalized.clone(),
+            score: interface_score(&iface.name, &normalized, prefer_overlay),
             preferred: !preferred_ip.is_empty() && normalized == preferred_ip,
-            score,
+            address: normalized,
+            name: iface.name,
         });
     }
     list.sort_by_key(|v| v.score);
     list
 }
 
-fn pick_local_ip(preferred_ip: &str) -> String {
-    let interfaces = network_interfaces(preferred_ip);
+fn pick_local_ip(preferred_ip: &str, prefer_overlay: bool) -> String {
+    let interfaces = network_interfaces(preferred_ip, prefer_overlay);
     if !preferred_ip.is_empty() {
         if let Some(found) = interfaces.iter().find(|i| i.address == preferred_ip) {
             return found.address.clone();
@@ -306,7 +328,7 @@ pub fn initialize_state(state: &NetworkingState) {
         .map(|v| v.to_string_lossy().to_string())
         .unwrap_or_else(|_| "offline".to_string());
     guard.display_name = guard.hostname.clone();
-    guard.local_ip = pick_local_ip(&guard.preferred_ip);
+    guard.local_ip = pick_local_ip(&guard.preferred_ip, guard.prefer_overlay);
     guard.refresh_local_ips();
 }
 
@@ -424,23 +446,83 @@ fn emit_peers_identity_change(app: &AppHandle, state: &NetworkingState) {
     crate::tray::refresh(app, state);
 }
 
+/// Re-pick the local address after a preference change; if it moved, reset
+/// peer state so discovery re-converges on the new identity. (Manual peers
+/// survive the reset — the publisher re-seeds them from `manual_peers`.)
+fn repick_local_ip_locked(guard: &mut NetworkRuntime) {
+    guard.refresh_local_ips();
+    let next_ip = pick_local_ip(&guard.preferred_ip, guard.prefer_overlay);
+    if next_ip != guard.local_ip {
+        guard.local_ip = next_ip;
+        guard.peers.clear();
+        guard.diagnostics.mdns_resets += 1;
+        guard.diagnostics.last_node_connect_attempt_at = now_millis();
+        guard.diagnostics.last_connect_error = "network-reinit-pending".to_string();
+        guard.diagnostics.peers_count = 0;
+        guard.diagnostics.chat_peers_count = 0;
+    }
+}
+
 pub fn set_preferred_ip(state: &NetworkingState, ip: String) -> NetworkStatusPayload {
     {
         let mut guard = state.lock_runtime();
         guard.preferred_ip = ip.trim().to_string();
-        guard.refresh_local_ips();
-        let next_ip = pick_local_ip(&guard.preferred_ip);
-        if next_ip != guard.local_ip {
-            guard.local_ip = next_ip;
-            guard.peers.clear();
-            guard.diagnostics.mdns_resets += 1;
-            guard.diagnostics.last_node_connect_attempt_at = now_millis();
-            guard.diagnostics.last_connect_error = "network-reinit-pending".to_string();
-            guard.diagnostics.peers_count = 0;
-            guard.diagnostics.chat_peers_count = 0;
-        }
+        repick_local_ip_locked(&mut guard);
     }
     status_payload(state)
+}
+
+/// Toggle overlay-interface preference (Tailscale mode). Same reset semantics
+/// as changing the preferred IP.
+pub fn set_prefer_overlay(state: &NetworkingState, prefer: bool) -> NetworkStatusPayload {
+    {
+        let mut guard = state.lock_runtime();
+        guard.prefer_overlay = prefer;
+        repick_local_ip_locked(&mut guard);
+    }
+    status_payload(state)
+}
+
+/// Normalize an "Add by IP" list: trim, require a parseable IPv4, drop dupes.
+/// Hostnames/MagicDNS names are deliberately not accepted yet — an unresolved
+/// name would sit in the buddy list as a permanent ghost entry.
+fn normalize_manual_peers(list: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for entry in list {
+        let trimmed = normalize_ip(entry.trim());
+        if trimmed.parse::<Ipv4Addr>().is_ok() && !out.contains(&trimmed) {
+            out.push(trimmed);
+        }
+    }
+    out
+}
+
+/// Set the manual ("Add by IP") peer list. Entries join the peer table
+/// immediately (name defaults to the IP), are exempt from stale-pruning, and
+/// get probed with a heartbeat right away — the ack fills in the peer's real
+/// name and peerId through the normal presence path.
+pub fn set_manual_peers(app: &AppHandle, state: &NetworkingState, list: Vec<String>) {
+    let (changed, targets) = {
+        let mut guard = state.lock_runtime();
+        guard.manual_peers = normalize_manual_peers(&list);
+        let ips = guard.manual_peers.clone();
+        let mut changed = false;
+        for ip in &ips {
+            if guard.is_local_ip(ip) {
+                continue;
+            }
+            if upsert_peer_locked(&mut guard, ip, "", "", "") {
+                changed = true;
+            }
+        }
+        (changed, ips)
+    };
+    if changed {
+        emit_peers_identity_change(app, state);
+    }
+    for ip in targets {
+        send_heartbeat(state, &ip, false);
+    }
 }
 
 pub fn set_discovery_node_ip(state: &NetworkingState, ip: String) -> NetworkStatusPayload {
@@ -510,10 +592,20 @@ pub fn start_status_publisher(app: AppHandle, state: NetworkingState) {
             let now = now_millis();
             let (pruned, dirty) = {
                 let mut guard = state.lock_runtime();
+                let manual = guard.manual_peers.clone();
                 let before = guard.peers.len();
-                guard
-                    .peers
-                    .retain(|_, peer| now.saturating_sub(peer.last_seen) <= PEER_STALE_MS);
+                // Manual entries never get pruned — they'd silently vanish
+                // with no discovery source to bring them back.
+                guard.peers.retain(|ip, peer| {
+                    manual.iter().any(|m| m == ip)
+                        || now.saturating_sub(peer.last_seen) <= PEER_STALE_MS
+                });
+                // Re-seed manual entries a network reset cleared.
+                for ip in &manual {
+                    if !guard.peers.contains_key(ip) && !guard.is_local_ip(ip) {
+                        upsert_peer_locked(&mut guard, ip, "", "", "");
+                    }
+                }
                 let pruned = guard.peers.len() != before;
                 guard.diagnostics.peers_count = guard.peers.len();
                 if tick % 12 == 0 {
@@ -1146,6 +1238,37 @@ mod tests {
             "kind upgrade is an identity change"
         );
         assert!(rt.peers_dirty, "any touch marks the runtime dirty for the publisher tick");
+    }
+
+    #[test]
+    fn manual_peer_list_normalizes_and_rejects_junk() {
+        let raw = vec![
+            "  100.101.102.103 ".to_string(),
+            "192.168.1.30".to_string(),
+            "100.101.102.103".to_string(), // dupe
+            "my-macbook".to_string(),      // hostnames not accepted yet
+            "not an ip".to_string(),
+            "".to_string(),
+            "::ffff:10.0.0.9".to_string(), // v6-mapped normalizes to v4
+        ];
+        assert_eq!(
+            normalize_manual_peers(&raw),
+            vec!["100.101.102.103", "192.168.1.30", "10.0.0.9"]
+        );
+    }
+
+    #[test]
+    fn overlay_preference_flips_interface_ranking() {
+        // LAN mode: the private LAN address must beat the tailnet address.
+        assert!(
+            interface_score("en0", "192.168.1.20", false)
+                < interface_score("tailscale0", "100.101.102.103", false)
+        );
+        // Overlay mode: the tailnet address must win.
+        assert!(
+            interface_score("tailscale0", "100.101.102.103", true)
+                < interface_score("en0", "192.168.1.20", true)
+        );
     }
 
     #[test]
