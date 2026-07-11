@@ -11,7 +11,7 @@ use tauri::{
 };
 
 use crate::networking::{self, NetworkingState};
-use crate::{persistence, store};
+use crate::persistence;
 
 pub const TRAY_ID: &str = "pings-tray";
 
@@ -110,22 +110,13 @@ fn tray_ping(app: &AppHandle, state: &NetworkingState, ip: String) {
         sound,
         settings.ping_shape.clone(),
     ) {
-        let peer_id = target.as_ref().map(|p| p.peer_id.clone()).unwrap_or_default();
-        let peer_name = target
-            .as_ref()
-            .map(|p| p.name.clone())
-            .unwrap_or_else(|| target_ip.clone());
-        let _ = store::record(
+        crate::record_outgoing(
             app,
-            &store::HistoryEvent::new(
-                "ping",
-                "out",
-                peer_id,
-                target_ip,
-                peer_name,
-                payload.message.clone(),
-                payload.timestamp,
-            ),
+            "ping",
+            target.as_ref(),
+            &target_ip,
+            &payload.message,
+            payload.timestamp,
         );
     }
 }

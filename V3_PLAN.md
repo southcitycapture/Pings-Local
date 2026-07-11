@@ -201,3 +201,16 @@ Verified by rendering the built UI headless (Chromium) with a mocked bridge and 
 - **Settings consolidated into one window.** The Options window is rebuilt on the shared tokens (light/dark, no more CDN font or `body.dark`), and the profile **name** and default-ping **message** fields — which the main-window redesign had dropped — are recovered here, so Options is the single settings home. Ping-effect sliders show live values (opacity %, px, seconds).
 
 **v3.1 shell is complete.**
+
+### Beta 0.3.5 — the efficiency pass
+
+A hard review of the whole codebase, hunting hot-path waste. All verified by `cargo check` (0 warnings), the store tests, and a production Vite build:
+
+- **No more syscall-per-packet.** `is_local_interface_ip` re-enumerated every network interface (`getifaddrs`) on *every* incoming ping/chat/heartbeat/mDNS event, while holding the runtime mutex. The local-IP set is now cached in the runtime and refreshed once a minute by the status publisher (and on preferred-IP change).
+- **One UDP send socket.** All five senders (ping, team, private, heartbeat, ack) bound a fresh socket per call — heartbeats alone made one per peer per cycle. They now share a single lazily-bound socket via one `send_json` helper, which also deleted five copies of the bind+serialize+send block.
+- **Coalesced UI updates.** Every received heartbeat used to clone+sort+serialize the whole peer list, emit it to every window, *and rebuild the tray menu on the main thread*. `upsert_peer_locked` now reports whether identity actually changed: joins/renames broadcast immediately (and refresh the tray); bare `last_seen` refreshes just mark the runtime dirty, and the 5-second publisher tick drains that into at most one snapshot per tick. The tray no longer rebuilds for timestamp ticks at all.
+- **Diagnostics dedup.** The 20-field `RuntimeDiagnostics` was hand-copied field-by-field into a parallel `NetworkDiagnostics` struct on every status emit; it's now `#[serde(flatten)]`-ed in one line. Same JSON shape on the wire.
+- **SQLite connection cached.** The history store re-opened the DB file and re-ran `CREATE TABLE`/`PRAGMA` on every insert; one connection now lives behind a mutex for the app's lifetime.
+- **Startup bundle −74%.** socket.io-client (needed only for legacy v1 pings) was statically baked into the main window bundle. It's now a dynamic import, so Vite code-splits it: main-window JS went from 54.9 kB (17.5 gzip) to 14.1 kB (5.0 gzip), and the socket.io chunk loads only if a v1 peer is ever pinged.
+- **Dead code deleted.** The write-only `peer_fullnames` map, the always-empty `chat-peers-updated` event, the per-peer CSS-gradient `color` field no frontend read, the `health`/`migration_modules` v2-relic commands, and the DM window's private copies of `escapeHtml`/`formatAgo`/`initials`/`playSound` (now imported from `core/`). The DM window also stops re-invoking `get_peers` on every peers-updated event — the event already carries the list.
+- **Legacy listener slimmed.** The v1 socket.io compatibility listener spun up a multi-threaded tokio runtime (a worker per core) for a few packets a day; it's single-threaded now.

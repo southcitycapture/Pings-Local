@@ -1,14 +1,6 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
-export function health() {
-  return invoke("health");
-}
-
-export function migrationModules() {
-  return invoke("migration_modules");
-}
-
 export function getNetworkInterfaces() {
   return invoke("get_network_interfaces");
 }
@@ -83,10 +75,6 @@ export async function onNetworkStatus(callback) {
 
 export async function onPeersUpdated(callback) {
   return listen("peers-updated", (event) => callback(event.payload || []));
-}
-
-export async function onChatPeersUpdated(callback) {
-  return listen("chat-peers-updated", (event) => callback(event.payload || []));
 }
 
 export async function onIncomingPing(callback) {
