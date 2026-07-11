@@ -122,3 +122,27 @@ leaves the message at "sent".
 
 That's the whole contract. The reference implementation in
 [`agent-bridge/`](../agent-bridge) does exactly this in ~150 lines of Node.
+
+## Dispatch — team server HTTP API (v1)
+
+Where multicast can't reach (other subnets, tailnets), a
+[Pings Dispatch](../dispatch) server replaces mDNS as the discovery source.
+It is *only* a roster: pings and chat still flow directly peer-to-peer over
+the UDP ports above.
+
+Default port **43217**, JSON over HTTP. All endpoints except `/v1/health`
+require `Authorization: Bearer <team-key>`.
+
+| Method & path | Body | Effect |
+|---|---|---|
+| `POST /v1/register` | `{peerId, name, kind, ip, port}` | Idempotent upsert — **doubles as the heartbeat**; clients call it every 30s. Server stamps `lastSeen`. |
+| `GET /v1/peers` | — | `{peers: [{peerId, name, kind, ip, port, lastSeen}]}` — stale entries (15 min) pruned. |
+| `DELETE /v1/peers/{peerId}` | — | Remove a peer (clean shutdown). |
+| `GET /v1/health` | — | `{app, version}` — unauthenticated liveness. |
+
+An agent can join a Dispatch roster the same way a human client does:
+register with `kind=agent` and listen on the UDP ports as described above.
+
+D1 security posture: one shared team key, plain HTTP — deploy on a
+WireGuard/Tailscale overlay only. TLS and per-device tokens are phase D2
+(docs/DISPATCH-PLAN.md).

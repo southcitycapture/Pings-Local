@@ -149,6 +149,21 @@
           Tailscale IPs (100.x.y.z) work great. Restart Pings after changing
           these so it re-announces from the right address.
         </p>
+        <label class="field">
+          Team server (Pings Dispatch)
+          <input
+            id="dispatch-url"
+            type="text"
+            placeholder="e.g. 100.64.0.1:43217"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </label>
+        <label class="field">
+          Team key
+          <input id="dispatch-key" type="password" placeholder="Shared team key" autocomplete="off" />
+        </label>
+        <p id="dispatch-status" class="muted-note">No team server configured.</p>
       </section>
 
       <section class="card">

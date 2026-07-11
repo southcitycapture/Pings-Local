@@ -11,6 +11,8 @@ use tauri::{AppHandle, Emitter};
 const MDNS_SERVICE_TYPE: &str = "_pings._tcp.local.";
 const PING_PORT: u16 = 43210;
 const CHAT_PORT: u16 = 43211;
+/// Default port of a Pings Dispatch (team) server.
+const DISPATCH_PORT: u16 = 43217;
 const PEER_STALE_MS: u64 = 900_000;
 /// How often we heartbeat known peers to keep presence fresh. Must stay well
 /// under the frontend's 120s "online" window.
@@ -136,6 +138,10 @@ pub struct NetworkRuntime {
     /// Prefer overlay interfaces (Tailscale/WireGuard) when picking the local
     /// address — see `interface_score`.
     pub prefer_overlay: bool,
+    /// Shared key presented to the Dispatch (team) server.
+    pub dispatch_team_key: String,
+    /// Did the last Dispatch register/list round-trip succeed?
+    pub dispatch_connected: bool,
     /// Every IPv4 assigned to this machine (plus loopback), cached so packet
     /// handlers can drop self-traffic with a set lookup instead of re-running
     /// interface enumeration per packet. Refreshed by the status publisher.
@@ -425,7 +431,7 @@ pub fn status_payload(state: &NetworkingState) -> NetworkStatusPayload {
             local_ip: guard.local_ip.clone(),
             preferred_ip: guard.preferred_ip.clone(),
             discovery_node_ip: guard.discovery_node_ip.clone(),
-            discovery_node_connected: false,
+            discovery_node_connected: guard.dispatch_connected,
             runtime: guard.diagnostics.clone(),
         },
     }
@@ -529,6 +535,7 @@ pub fn set_discovery_node_ip(state: &NetworkingState, ip: String) -> NetworkStat
     {
         let mut guard = state.lock_runtime();
         guard.discovery_node_ip = ip.trim().to_string();
+        guard.dispatch_connected = false;
         guard.diagnostics.last_node_connect_attempt_at = now_millis();
         if guard.discovery_node_ip.is_empty() {
             guard.diagnostics.last_connect_error.clear();
@@ -538,6 +545,167 @@ pub fn set_discovery_node_ip(state: &NetworkingState, ip: String) -> NetworkStat
         }
     }
     status_payload(state)
+}
+
+pub fn set_dispatch_team_key(state: &NetworkingState, key: String) {
+    let mut guard = state.lock_runtime();
+    guard.dispatch_team_key = key.trim().to_string();
+    // Force a fresh round-trip verdict under the new key.
+    guard.dispatch_connected = false;
+}
+
+/// Turn the user's "team server" field into a base URL. Accepts a bare
+/// host/IP, host:port, or a full http(s) URL; empty input means "no server".
+fn normalize_dispatch_url(raw: &str) -> Option<String> {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        return Some(trimmed.to_string());
+    }
+    if trimmed.contains(':') {
+        return Some(format!("http://{trimmed}"));
+    }
+    Some(format!("http://{trimmed}:{DISPATCH_PORT}"))
+}
+
+/// A peer as the Dispatch server reports it (see dispatch/README.md).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DispatchPeer {
+    #[serde(default)]
+    peer_id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    ip: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DispatchPeersResponse {
+    peers: Vec<DispatchPeer>,
+}
+
+/// The Dispatch client: register ourselves (registration doubles as the
+/// server-side heartbeat) and pull the roster on the same cadence as LAN
+/// heartbeats. Roster peers merge into the ordinary peer table, so everything
+/// downstream — buddy list, pings, chat, history — treats them like any
+/// discovered peer, and traffic still flows direct peer-to-peer.
+pub fn start_dispatch_client(app: AppHandle, state: NetworkingState) {
+    std::thread::spawn(move || {
+        let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+            Ok(rt) => rt,
+            Err(err) => {
+                let mut guard = state.lock_runtime();
+                guard.diagnostics.last_connect_error = format!("dispatch-rt:{err}");
+                return;
+            }
+        };
+        let client = match reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+        {
+            Ok(c) => c,
+            Err(err) => {
+                let mut guard = state.lock_runtime();
+                guard.diagnostics.last_connect_error = format!("dispatch-client:{err}");
+                return;
+            }
+        };
+
+        loop {
+            let (base, key, me) = {
+                let guard = state.lock_runtime();
+                (
+                    normalize_dispatch_url(&guard.discovery_node_ip),
+                    guard.dispatch_team_key.clone(),
+                    serde_json::json!({
+                        "peerId": guard.local_peer_id,
+                        "name": guard.display_name,
+                        "kind": "human",
+                        "ip": guard.local_ip,
+                        "port": PING_PORT,
+                    }),
+                )
+            };
+
+            if let Some(base) = base {
+                let result = runtime.block_on(async {
+                    client
+                        .post(format!("{base}/v1/register"))
+                        .bearer_auth(&key)
+                        .json(&me)
+                        .send()
+                        .await?
+                        .error_for_status()?;
+                    let listed = client
+                        .get(format!("{base}/v1/peers"))
+                        .bearer_auth(&key)
+                        .send()
+                        .await?
+                        .error_for_status()?
+                        .json::<DispatchPeersResponse>()
+                        .await?;
+                    Ok::<_, reqwest::Error>(listed)
+                });
+
+                match result {
+                    Ok(listed) => {
+                        let (was_connected, identity_changed) = {
+                            let mut guard = state.lock_runtime();
+                            let was = guard.dispatch_connected;
+                            let local_id = guard.local_peer_id.clone();
+                            let mut changed = false;
+                            for peer in &listed.peers {
+                                if peer.ip.trim().is_empty()
+                                    || peer.peer_id == local_id
+                                    || guard.is_local_ip(&peer.ip)
+                                {
+                                    continue;
+                                }
+                                if upsert_peer_locked(
+                                    &mut guard, &peer.ip, &peer.peer_id, &peer.kind, &peer.name,
+                                ) {
+                                    changed = true;
+                                }
+                            }
+                            guard.dispatch_connected = true;
+                            guard.diagnostics.last_node_connect_success_at = now_millis();
+                            guard.diagnostics.last_peer_list_sync_at = now_millis();
+                            guard.diagnostics.last_peer_list_count = listed.peers.len();
+                            guard.diagnostics.last_connect_error.clear();
+                            (was, changed)
+                        };
+                        if identity_changed {
+                            emit_peers_identity_change(&app, &state);
+                        }
+                        if !was_connected {
+                            emit_network_status(&app, &state);
+                        }
+                    }
+                    Err(err) => {
+                        let was_connected = {
+                            let mut guard = state.lock_runtime();
+                            let was = guard.dispatch_connected;
+                            guard.dispatch_connected = false;
+                            guard.diagnostics.last_node_connect_attempt_at = now_millis();
+                            guard.diagnostics.last_connect_error = format!("dispatch:{err}");
+                            was
+                        };
+                        if was_connected {
+                            emit_network_status(&app, &state);
+                        }
+                    }
+                }
+            }
+
+            std::thread::sleep(Duration::from_secs(HEARTBEAT_SECS));
+        }
+    });
 }
 
 pub fn emit_network_status(app: &AppHandle, state: &NetworkingState) {
@@ -1268,6 +1436,24 @@ mod tests {
         assert!(
             interface_score("tailscale0", "100.101.102.103", true)
                 < interface_score("en0", "192.168.1.20", true)
+        );
+    }
+
+    #[test]
+    fn dispatch_url_accepts_host_hostport_and_full_urls() {
+        assert_eq!(normalize_dispatch_url(""), None);
+        assert_eq!(normalize_dispatch_url("   "), None);
+        assert_eq!(
+            normalize_dispatch_url("100.64.0.1").as_deref(),
+            Some("http://100.64.0.1:43217")
+        );
+        assert_eq!(
+            normalize_dispatch_url("100.64.0.1:8080").as_deref(),
+            Some("http://100.64.0.1:8080")
+        );
+        assert_eq!(
+            normalize_dispatch_url("https://dispatch.example.com/").as_deref(),
+            Some("https://dispatch.example.com")
         );
     }
 

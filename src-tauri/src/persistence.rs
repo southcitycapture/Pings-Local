@@ -15,7 +15,10 @@ pub struct Settings {
     pub custom_message: String,
     pub ping_shape: String,
     pub preferred_ip: String,
+    /// Team server (Pings Dispatch) address — host, host:port, or full URL.
     pub discovery_node_ip: String,
+    /// Shared team key presented to the Dispatch server.
+    pub dispatch_team_key: String,
     /// "Add by IP": peers reached by address where discovery can't see them
     /// (other subnets, tailnets). Fed into the peer table alongside mDNS.
     pub manual_peers: Vec<String>,
@@ -64,6 +67,7 @@ impl Default for Settings {
             ping_shape: "circle".to_string(),
             preferred_ip: String::new(),
             discovery_node_ip: String::new(),
+            dispatch_team_key: String::new(),
             manual_peers: Vec::new(),
             prefer_overlay_interface: false,
             peer_sounds: HashMap::new(),
@@ -172,6 +176,11 @@ pub fn update_setting(app: &AppHandle, key: String, value: Value) -> Result<Sett
         "discoveryNodeIp" => {
             if let Some(v) = value.as_str() {
                 settings.discovery_node_ip = v.to_string();
+            }
+        }
+        "dispatchTeamKey" => {
+            if let Some(v) = value.as_str() {
+                settings.dispatch_team_key = v.trim().to_string();
             }
         }
         "manualPeers" => {
