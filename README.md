@@ -187,6 +187,8 @@ a signed universal `.dmg` (with the macOS auto-update manifest) plus Linux
 
 - **[docs/PROTOCOL.md](./docs/PROTOCOL.md)** — the wire protocol (build your own peer or agent)
 - **[V3_PLAN.md](./V3_PLAN.md)** — design direction, architecture, and roadmap
+- **[docs/PRODUCT-LINE.md](./docs/PRODUCT-LINE.md)** — the road past 1.0: Pings (free) · Pings Dispatch (server, paid) · Pings Go! (mobile)
+- **[docs/DISPATCH-PLAN.md](./docs/DISPATCH-PLAN.md)** — the phased build plan for Dispatch and Go!
 - **[agent-bridge/](./agent-bridge)** — the reference AI-peer daemon
 - **[UPDATER_SETUP.md](./UPDATER_SETUP.md)** — updater and release process
 - **[docs/TESTING.md](./docs/TESTING.md)** — two-machine testing and network notes
