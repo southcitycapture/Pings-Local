@@ -6,6 +6,7 @@
   "permissions": [
     "core:default",
     "store:default",
-    "haptics:default"
+    "haptics:default",
+    "go-push:default"
   ]
 }

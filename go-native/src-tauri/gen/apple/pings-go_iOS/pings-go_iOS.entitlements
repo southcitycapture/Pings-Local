@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-<dict/>
+<dict>
+	<!-- Simulator ignores entitlements; these arm real devices (Phase 4).
+	     Switch aps-environment to "production" for TestFlight/App Store. -->
+	<key>aps-environment</key>
+	<string>development</string>
+	<key>com.apple.developer.usernotifications.time-sensitive</key>
+	<true/>
+</dict>
 </plist>

@@ -228,6 +228,7 @@ function renderThread() {
 function openChat(peerId) {
   currentChat = peerId;
   unread.delete(peerId);
+  syncBadge();
   renderRoster();
   renderThread();
   show("chat");
@@ -319,6 +320,7 @@ function handleFrame(text) {
       renderThread();
     } else {
       unread.set(from, (unread.get(from) || 0) + 1);
+      syncBadge();
       renderRoster();
       toast((p.from || "Someone") + ": " + (p.message || ""));
     }
@@ -337,6 +339,43 @@ function connectWs() {
     if (store.token && wsWanted) setTimeout(connectWs, 4000);
   };
   ws.onerror = () => ws.close();
+}
+
+// ---------------------------------------------------------------- push
+// The whole point of the native shell: register for APNs and hand the token
+// to Dispatch so undeliverable frames become notifications. Re-enrolling
+// wipes the server's copy, so the token is re-POSTed every session start.
+let pushListenersReady = false;
+
+async function postPushToken(token) {
+  if (!token) return;
+  try {
+    await api("/v1/push-token", {
+      method: "POST",
+      body: JSON.stringify({ peerId: store.peerId, platform: "apns", pushToken: token }),
+    });
+  } catch { /* best-effort; retried next session start */ }
+}
+
+async function initPush() {
+  if (!TAURI?.core?.invoke) return; // browser / desktop dev: nothing to do
+  const { invoke, addPluginListener } = TAURI.core;
+  try {
+    if (!pushListenersReady) {
+      await addPluginListener("go-push", "pushToken", (e) => postPushToken(e.token));
+      pushListenersReady = true;
+      await invoke("plugin:go-push|request_push");
+    }
+    const current = await invoke("plugin:go-push|get_token");
+    if (current?.token) postPushToken(current.token);
+  } catch { /* plugin absent (desktop) or permission denied — web behavior remains */ }
+}
+
+function syncBadge() {
+  if (!TAURI?.core?.invoke) return;
+  let total = 0;
+  for (const n of unread.values()) total += n;
+  TAURI.core.invoke("plugin:go-push|set_badge", { count: total }).catch(() => {});
 }
 
 // ---------------------------------------------------------------- session
@@ -379,6 +418,7 @@ async function startSession() {
   }
   connectWs();
   startTimers();
+  initPush();
 }
 
 // iOS freezes JS in the background but the server would keep the socket
