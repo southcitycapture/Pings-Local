@@ -105,6 +105,7 @@ pub struct AppState {
     /// peerId -> outbound frame queue of that peer's live WebSocket.
     conns: Arc<Mutex<HashMap<String, UnboundedSender<String>>>>,
     state_file: Option<PathBuf>,
+    started_at: u64,
 }
 
 impl AppState {
@@ -117,6 +118,7 @@ impl AppState {
             devices: Arc::new(Mutex::new(HashMap::new())),
             conns: Arc::new(Mutex::new(HashMap::new())),
             state_file,
+            started_at: now_millis(),
         };
         state.load_devices();
         state
@@ -128,6 +130,10 @@ impl AppState {
 
     pub fn device_count(&self) -> usize {
         self.devices.lock().map(|d| d.len()).unwrap_or(0)
+    }
+
+    pub fn relay_connection_count(&self) -> usize {
+        self.conns.lock().map(|c| c.len()).unwrap_or(0)
     }
 }
 
@@ -375,6 +381,34 @@ async fn health() -> Json<serde_json::Value> {
     }))
 }
 
+/// Admin: server vitals for the dashboard (team key only).
+async fn admin_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let key_ok = bearer(&headers).map(|t| state.is_team_key(t)).unwrap_or(false);
+    if !key_ok {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    // Prune first so the roster count matches what /v1/peers would say.
+    if let Ok(mut roster) = state.roster.lock() {
+        prune_locked(&mut roster, now_millis());
+    }
+    Ok(Json(serde_json::json!({
+        "app": "pings-dispatch",
+        "version": env!("CARGO_PKG_VERSION"),
+        "startedAt": state.started_at,
+        "rosterCount": state.roster_count(),
+        "deviceCount": state.device_count(),
+        "relayConnections": state.relay_connection_count(),
+    })))
+}
+
+/// The admin dashboard — a single self-contained page baked into the binary.
+async fn admin_page() -> axum::response::Html<&'static str> {
+    axum::response::Html(include_str!("admin.html"))
+}
+
 // ---------------------------------------------------------------- relay
 
 /// The relay socket. Device-token auth only — the team key is for enrollment
@@ -461,7 +495,10 @@ async fn relay_session(state: AppState, peer_id: String, socket: WebSocket) {
 
 pub fn router(state: AppState) -> Router {
     Router::new()
+        .route("/", get(|| async { axum::response::Redirect::temporary("/admin") }))
+        .route("/admin", get(admin_page))
         .route("/v1/health", get(health))
+        .route("/v1/status", get(admin_status))
         .route("/v1/enroll", post(enroll))
         .route("/v1/devices", get(list_devices))
         .route("/v1/devices/{peer_id}", delete(revoke_device))
@@ -577,13 +614,7 @@ mod tests {
     use tower::ServiceExt;
 
     fn test_state() -> AppState {
-        AppState {
-            team_key: Arc::new("sesame".to_string()),
-            roster: Arc::new(Mutex::new(HashMap::new())),
-            devices: Arc::new(Mutex::new(HashMap::new())),
-            conns: Arc::new(Mutex::new(HashMap::new())),
-            state_file: None,
-        }
+        AppState::new("sesame".to_string(), None)
     }
 
     fn json_req(method: &str, uri: &str, auth: Option<&str>, body: &str) -> Request<Body> {
@@ -752,6 +783,37 @@ mod tests {
         assert_ne!(first, second);
         assert!(state.device_for_token(&second).is_some());
         assert!(state.device_for_token(&first).is_none(), "old token stops working");
+    }
+
+    #[tokio::test]
+    async fn admin_page_is_served_and_status_needs_the_key() {
+        // The dashboard shell is public (it holds no data)...
+        let res = router(test_state())
+            .oneshot(Request::builder().uri("/admin").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        let page = String::from_utf8_lossy(&bytes);
+        assert!(page.contains("Pings Dispatch"));
+        assert!(page.contains("Enrolled devices"));
+
+        // ...but the vitals endpoint is team-key only.
+        let res = router(test_state())
+            .oneshot(json_req("GET", "/v1/status", Some("guess"), ""))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+        let res = router(test_state())
+            .oneshot(json_req("GET", "/v1/status", Some("sesame"), ""))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let status = body_json(res).await;
+        assert_eq!(status["app"], "pings-dispatch");
+        assert_eq!(status["rosterCount"], 0);
+        assert_eq!(status["relayConnections"], 0);
+        assert!(status["startedAt"].as_u64().unwrap() > 0);
     }
 
     #[tokio::test]
