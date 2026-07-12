@@ -1,0 +1,17 @@
+{
+  "name": "pings-go-native",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Pings Go! native shell — the phone client as a Tauri app (iOS first)",
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "ios:init": "tauri ios init",
+    "ios:dev": "tauri ios dev",
+    "ios:build": "tauri ios build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

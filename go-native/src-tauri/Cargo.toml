@@ -1,0 +1,24 @@
+[package]
+name = "pings-go"
+version = "0.1.0"
+description = "Pings Go! — the phone client, native"
+authors = ["Pings Team"]
+edition = "2021"
+
+# Deliberately NOT the desktop crate (../../src-tauri): the phone shell needs
+# none of its mDNS/UDP/tray machinery — the Go! UI speaks to Dispatch over
+# HTTPS/WSS entirely from JS. Keeping this crate tiny keeps iOS builds fast.
+
+[lib]
+name = "pings_go_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-store = "2"
+tauri-plugin-haptics = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

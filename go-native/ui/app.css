@@ -1,0 +1,156 @@
+/* Pings Go! native — styles lifted from dispatch/src/go.html (the canonical
+   web client); keep the two visually identical. Tokens mirror
+   src/core/tokens.css. */
+:root {
+  --ground: #f5f7f6; --panel: #ffffff; --inset: #eef1f0;
+  --ink: #17211f; --ink-2: #5b6663; --ink-3: #8a9491;
+  --line: #e2e7e5; --accent: #14b8a6; --accent-ink: #0b6b61;
+  --amber: #f59e0b; --amber-ink: #92600a;
+  --good: #22a06b; --bad: #dc2626;
+  --radius: 12px;
+  --sat: env(safe-area-inset-top, 0px); --sab: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #0f1514; --panel: #161d1c; --inset: #1d2523;
+    --ink: #e8edec; --ink-2: #9fb0ac; --ink-3: #6d7a77;
+    --line: #253030; --accent: #2dd4bf; --accent-ink: #99f6e4;
+    --amber: #fbbf24; --amber-ink: #fde68a;
+  }
+}
+* { box-sizing: border-box; margin: 0; -webkit-tap-highlight-color: transparent; }
+html, body { height: 100%; }
+body {
+  font: 15px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif;
+  background: var(--ground); color: var(--ink);
+  overscroll-behavior: none;
+}
+[hidden] { display: none !important; }
+button { font: inherit; border: 0; cursor: pointer; background: none; color: inherit; }
+input {
+  font: inherit; width: 100%; height: 44px; color: var(--ink);
+  background: var(--inset); border: 1px solid var(--line);
+  border-radius: 10px; padding: 0 12px;
+}
+input:focus { outline: none; border-color: var(--accent); }
+
+/* ---- views are full-height flex columns ---- */
+.view { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--ground); }
+
+/* ---- sign in ---- */
+#signin { justify-content: center; padding: 24px; }
+.signin-card { width: 100%; max-width: 360px; margin: 0 auto; display: grid; gap: 12px; }
+.logo { width: 72px; height: 72px; border-radius: 18px; margin: 0 auto 6px; display: block; }
+.signin-card h1 { text-align: center; font-size: 22px; font-weight: 700; }
+.signin-card p { text-align: center; color: var(--ink-2); font-size: 13px; margin-bottom: 6px; }
+.cta {
+  height: 46px; border-radius: 10px; font-weight: 650;
+  background: var(--accent); color: #06302b;
+}
+.cta:active { filter: brightness(0.92); }
+#signin-error { color: var(--bad); font-size: 13px; text-align: center; min-height: 1.2em; }
+
+/* ---- header ---- */
+header {
+  padding: calc(var(--sat) + 10px) 16px 10px; background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: 10px; flex: none;
+}
+.conn { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); flex: none; }
+.conn.up { background: var(--good); }
+header .who { min-width: 0; }
+header .who .name { font-weight: 650; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+header .who .sub { color: var(--ink-3); font-size: 12px; }
+#signout { margin-left: auto; color: var(--ink-3); font-size: 13px; padding: 8px; }
+
+/* ---- roster ---- */
+#peer-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 8px 12px calc(var(--sab) + 16px); }
+.row {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 12px 14px; margin-bottom: 8px; min-height: 64px;
+}
+.row:active { background: var(--inset); }
+.avatar {
+  width: 40px; height: 40px; border-radius: 50%; flex: none;
+  display: grid; place-items: center; font-weight: 700; font-size: 14px; color: #fff;
+}
+.av-1 { background: #0d9488; } .av-2 { background: #7c3aed; } .av-3 { background: #db2777; }
+.av-4 { background: #ea580c; } .av-5 { background: #2563eb; } .av-6 { background: #65a30d; }
+.row .mid { min-width: 0; flex: 1; }
+.row .name { font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.row .name .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); }
+.row .name .dot.online { background: var(--good); }
+.badge {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.04em; color: var(--accent-ink);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 4px; padding: 1px 5px;
+}
+.row .sub { color: var(--ink-3); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.unread {
+  min-width: 20px; height: 20px; border-radius: 10px; padding: 0 6px; flex: none;
+  background: var(--accent); color: #06302b; font-size: 12px; font-weight: 700;
+  display: grid; place-items: center;
+}
+.ping-btn {
+  flex: none; height: 40px; padding: 0 16px; border-radius: 10px; font-weight: 700;
+  background: color-mix(in srgb, var(--amber) 22%, transparent); color: var(--amber-ink);
+  display: grid; place-items: center;
+}
+.ping-btn:active { background: color-mix(in srgb, var(--amber) 38%, transparent); }
+.ping-btn.sent { background: color-mix(in srgb, var(--good) 20%, transparent); color: var(--good); }
+.empty-list { color: var(--ink-3); text-align: center; padding: 48px 24px; }
+
+/* ---- chat ---- */
+#chat header .back { font-size: 22px; padding: 4px 10px 4px 0; color: var(--accent); }
+#thread { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 14px 14px 8px; display: flex; flex-direction: column; gap: 6px; }
+.bubble {
+  max-width: 78%; padding: 9px 12px; border-radius: 16px; font-size: 15px;
+  background: var(--panel); border: 1px solid var(--line);
+  align-self: flex-start; border-bottom-left-radius: 6px; word-wrap: break-word;
+}
+.bubble.mine {
+  align-self: flex-end; background: var(--accent); color: #06302b;
+  border: 0; border-bottom-left-radius: 16px; border-bottom-right-radius: 6px;
+}
+.bubble .meta { font-size: 10px; opacity: 0.65; margin-top: 3px; text-align: right; }
+.composer {
+  flex: none; display: flex; gap: 8px; padding: 10px 12px calc(var(--sab) + 10px);
+  background: var(--panel); border-top: 1px solid var(--line);
+}
+.composer button {
+  flex: none; width: 66px; border-radius: 10px; font-weight: 700;
+  background: var(--accent); color: #06302b;
+}
+
+/* ---- the flash: the soul of the app, on a phone ---- */
+#flash { position: fixed; inset: 0; z-index: 50; pointer-events: none; display: grid; place-items: center; }
+#flash .edge {
+  position: absolute; inset: 0;
+  box-shadow: inset 0 0 0 10px var(--flash-color, #14b8a6), inset 0 0 64px 22px color-mix(in srgb, var(--flash-color, #14b8a6) 55%, transparent);
+  animation: edge-pulse 1.15s ease-out forwards;
+}
+@keyframes edge-pulse {
+  0% { opacity: 0; } 12% { opacity: 1; } 55% { opacity: 0.9; } 100% { opacity: 0; }
+}
+#flash .card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+  padding: 18px 26px; text-align: center; box-shadow: 0 12px 40px rgba(0,0,0,0.25);
+  animation: card-pop 1.6s ease-out forwards;
+}
+@keyframes card-pop {
+  0% { opacity: 0; transform: scale(0.86); } 10% { opacity: 1; transform: scale(1); }
+  80% { opacity: 1; } 100% { opacity: 0; }
+}
+#flash .from { font-size: 19px; font-weight: 700; }
+#flash .msg { color: var(--ink-2); font-size: 14px; margin-top: 3px; }
+
+/* toast for in-app notices */
+#toast {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(var(--sab) + 18px); z-index: 60;
+  background: var(--ink); color: var(--ground); font-size: 13px; font-weight: 600;
+  border-radius: 20px; padding: 8px 16px; opacity: 0; transition: opacity 0.25s;
+  pointer-events: none; max-width: 86vw; text-align: center;
+}
+#toast.show { opacity: 1; }

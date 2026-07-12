@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The Go! webview: durable identity storage + haptics.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "store:default",
+    "haptics:default"
+  ]
+}

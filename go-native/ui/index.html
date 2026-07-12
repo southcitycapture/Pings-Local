@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<!--
+  Pings Go! native — adapted from dispatch/src/go.html (the canonical web
+  client). Protocol changes there must be mirrored here. Differences: an
+  explicit server URL (the webview has no Dispatch origin), plugin-backed
+  storage/haptics, no service worker/manifest (the app shell IS the install).
+-->
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<meta name="theme-color" content="#14b8a6" />
+<title>Pings Go!</title>
+<link rel="stylesheet" href="app.css" />
+</head>
+<body>
+
+<section id="signin" class="view" hidden>
+  <div class="signin-card">
+    <img class="logo" src="icon.png" alt="" />
+    <h1>Pings Go!</h1>
+    <p>Join your team. Your phone becomes pingable.</p>
+    <input id="in-server" type="url" placeholder="Server (https://dispatch.example.com:43217)" autocomplete="url" autocapitalize="off" autocorrect="off" />
+    <input id="in-name" type="text" placeholder="Your name" autocomplete="name" />
+    <input id="in-key" type="password" placeholder="Team key" autocomplete="off" />
+    <button id="in-go" class="cta">Join the team</button>
+    <div id="signin-error"></div>
+  </div>
+</section>
+
+<section id="roster" class="view" hidden>
+  <header>
+    <span class="conn" id="conn-dot"></span>
+    <div class="who">
+      <div class="name" id="self-name"></div>
+      <div class="sub" id="self-sub">connecting…</div>
+    </div>
+    <button id="signout">Sign out</button>
+  </header>
+  <div id="peer-list"></div>
+</section>
+
+<section id="chat" class="view" hidden>
+  <header>
+    <button class="back" id="chat-back">‹</button>
+    <div class="who">
+      <div class="name" id="chat-name"></div>
+      <div class="sub" id="chat-sub"></div>
+    </div>
+  </header>
+  <div id="thread"></div>
+  <div class="composer">
+    <input id="chat-input" type="text" placeholder="Message" autocomplete="off" enterkeyhint="send" />
+    <button id="chat-send">Send</button>
+  </div>
+</section>
+
+<div id="flash" hidden><div class="edge"></div><div class="card"><div class="from"></div><div class="msg"></div></div></div>
+<div id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
