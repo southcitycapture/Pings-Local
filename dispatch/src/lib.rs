@@ -409,8 +409,31 @@ async fn admin_page() -> axum::response::Html<&'static str> {
     axum::response::Html(include_str!("admin.html"))
 }
 
-// Pings Go! (the mobile companion served at /go) lands next — its routes
-// plug in here alongside /admin.
+/// Pings Go! — the mobile companion, served straight from the server so a
+/// phone needs nothing but a browser (and "Add to Home Screen" makes it an
+/// app). A single self-contained page plus the PWA fittings below.
+async fn go_page() -> axum::response::Html<&'static str> {
+    axum::response::Html(include_str!("go.html"))
+}
+
+async fn go_manifest() -> ([(&'static str, &'static str); 1], &'static str) {
+    (
+        [("content-type", "application/manifest+json")],
+        include_str!("go-manifest.json"),
+    )
+}
+
+async fn go_service_worker() -> ([(&'static str, &'static str); 1], &'static str) {
+    ([("content-type", "text/javascript")], include_str!("go-sw.js"))
+}
+
+async fn go_icon_192() -> ([(&'static str, &'static str); 1], &'static [u8]) {
+    ([("content-type", "image/png")], include_bytes!("go-icon-192.png"))
+}
+
+async fn go_icon_512() -> ([(&'static str, &'static str); 1], &'static [u8]) {
+    ([("content-type", "image/png")], include_bytes!("go-icon-512.png"))
+}
 
 // ---------------------------------------------------------------- relay
 
@@ -504,8 +527,13 @@ async fn relay_session(state: AppState, peer_id: String, socket: WebSocket) {
 
 pub fn router(state: AppState) -> Router {
     Router::new()
-        .route("/", get(|| async { axum::response::Redirect::temporary("/admin") }))
+        .route("/", get(|| async { axum::response::Redirect::temporary("/go") }))
         .route("/admin", get(admin_page))
+        .route("/go", get(go_page))
+        .route("/go/manifest.webmanifest", get(go_manifest))
+        .route("/go/sw.js", get(go_service_worker))
+        .route("/go/icon-192.png", get(go_icon_192))
+        .route("/go/icon-512.png", get(go_icon_512))
         .route("/v1/health", get(health))
         .route("/v1/status", get(admin_status))
         .route("/v1/enroll", post(enroll))
@@ -823,6 +851,63 @@ mod tests {
         assert_eq!(status["rosterCount"], 0);
         assert_eq!(status["relayConnections"], 0);
         assert!(status["startedAt"].as_u64().unwrap() > 0);
+    }
+
+    #[tokio::test]
+    async fn go_app_and_pwa_fittings_are_served() {
+        for (path, marker) in [
+            ("/go", "Pings Go!"),
+            ("/go/manifest.webmanifest", "\"start_url\": \"/go\""),
+            ("/go/sw.js", "pings-go"),
+        ] {
+            let res = router(test_state())
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::OK, "{path}");
+            let bytes = res.into_body().collect().await.unwrap().to_bytes();
+            assert!(
+                String::from_utf8_lossy(&bytes).contains(marker),
+                "{path} contains {marker}"
+            );
+        }
+        // Icons are binary PNGs.
+        let res = router(test_state())
+            .oneshot(Request::builder().uri("/go/icon-192.png").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(&bytes[1..4], b"PNG");
+    }
+
+    #[tokio::test]
+    async fn ws_accepts_token_as_query_param() {
+        // Browsers can't set WS headers — the query param must authenticate,
+        // and a junk query token must not.
+        let state = test_state();
+        let token = body_json(
+            router(state.clone())
+                .oneshot(json_req("POST", "/v1/enroll", Some("sesame"), r#"{"peerId":"phone"}"#))
+                .await
+                .unwrap(),
+        )
+        .await["deviceToken"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = router(state.clone());
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let good = tokio_tungstenite::connect_async(format!("ws://{addr}/v1/ws?token={token}")).await;
+        assert!(good.is_ok(), "query-param token connects");
+        let bad = tokio_tungstenite::connect_async(format!("ws://{addr}/v1/ws?token=junk")).await;
+        assert!(bad.is_err(), "junk query token rejected");
     }
 
     #[tokio::test]

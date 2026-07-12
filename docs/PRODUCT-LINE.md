@@ -66,6 +66,13 @@ Pings on your phone. Sees the team roster, sends pings and messages, and —
 the headline — **receives a ping as a push notification** when you're away
 from your desk.
 
+> Shipping in two steps: the **web companion is built** — served by
+> Dispatch at `/go`, installable as a PWA, full flash/DM/ack experience
+> while open (no accounts, no app store). The **native app** adds
+> receiving-while-closed via push; its punch list is
+> [GO-NATIVE-HANDOFF.md](./GO-NATIVE-HANDOFF.md) and it starts when the
+> Apple Developer account exists.
+
 - **Hard dependency:** Dispatch. This is a technical fact, not a marketing
   choice: iOS and Android will not let an app listen on UDP ports or browse
   mDNS in the background, and iOS has no full-screen flash over other apps. A
