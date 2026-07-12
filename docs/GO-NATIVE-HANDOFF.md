@@ -1,5 +1,14 @@
 # Handoff: Pings Go! native (for the Mac-side session)
 
+> **STATUS (2026-07-12): steps 2 and 3 are DONE and verified on the iOS
+> Simulator** — Dispatch push gateway (`dispatch/src/push.rs`, `/v1/push-token`,
+> undeliverable→APNs hook, `DISPATCH_PUSH_DEBUG=log`), and the iOS shell at
+> [`go-native/`](../go-native/README.md) (onboarding, roster/ping/DMs, store
+> persistence, haptics, go-push plugin registering real simulator APNs tokens).
+> Remaining: step 1's Apple Developer account (enrollment pending) gates real
+> APNs + device runs + TestFlight (step 4). See go-native/README.md for the
+> run + ship checklist.
+
 > Audience: the Claude Code session running locally on the Mac. The web
 > version of Pings Go! is **built and verified** (served by Dispatch at
 > `/go`); this document is the punch list for taking Go! native — the parts

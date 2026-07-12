@@ -213,7 +213,11 @@
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
-const esc = (t) => { const d = document.createElement("div"); d.textContent = String(t ?? ""); return d.innerHTML; };
+// Escapes quotes too — esc() output lands inside double-quoted attributes
+// (data-open="…"), and peer names/ids come from other clients.
+const esc = (t) =>
+  String(t ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 // ---------------------------------------------------------------- identity
 const store = {

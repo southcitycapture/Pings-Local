@@ -101,13 +101,19 @@ class GoPushPlugin: Plugin, UNUserNotificationCenterDelegate {
   }
 
   // A tap on a notification launched/foregrounded us — let JS route.
+  // The server puts the sender's peer id in the payload so the app can
+  // open the right thread.
   func userNotificationCenter(
     _ center: UNUserNotificationCenter,
     didReceive response: UNNotificationResponse,
     withCompletionHandler completionHandler: @escaping () -> Void
   ) {
     let content = response.notification.request.content
-    trigger("pushTap", data: ["title": content.title, "body": content.body])
+    var data: JSObject = ["title": content.title, "body": content.body]
+    if let from = content.userInfo["fromPeerId"] as? String {
+      data["fromPeerId"] = from
+    }
+    trigger("pushTap", data: data)
     completionHandler()
   }
 }

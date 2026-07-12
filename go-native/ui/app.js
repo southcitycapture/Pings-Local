@@ -15,26 +15,29 @@
 //     pushable, by design.
 "use strict";
 const $ = (id) => document.getElementById(id);
-const esc = (t) => { const d = document.createElement("div"); d.textContent = String(t ?? ""); return d.innerHTML; };
+// Escapes quotes too — esc() output lands inside double-quoted attributes
+// (data-open="…"), and peer names/ids come from other clients.
+const esc = (t) =>
+  String(t ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 const TAURI = window.__TAURI__ || null;
 
 // ---------------------------------------------------------------- storage
-const STORE_KEYS = ["go-token", "go-peer-id", "go-name", "go-server", "go-onboarded", "go-push-asked"];
 const storage = {
   cache: new Map(),
   backend: null, // tauri store, when running in the shell
   async init() {
+    // Hydrate everything ever written — no key whitelist to forget to update.
     if (TAURI?.store) {
       this.backend = await TAURI.store.load("go.json", { autoSave: true });
-      for (const key of STORE_KEYS) {
-        const value = await this.backend.get(key);
+      for (const [key, value] of await this.backend.entries()) {
         if (value != null) this.cache.set(key, value);
       }
     } else {
-      for (const key of STORE_KEYS) {
-        const value = localStorage.getItem(key);
-        if (value != null) this.cache.set(key, value);
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key?.startsWith("go-")) this.cache.set(key, localStorage.getItem(key));
       }
     }
   },
@@ -329,16 +332,30 @@ function handleFrame(text) {
   }
 }
 
+let reconnectTimer = null;
+
 function connectWs() {
   if (!store.token || !wsWanted) return;
-  ws = new WebSocket(`${wsServer()}/v1/ws?token=${encodeURIComponent(store.token)}`);
-  ws.onopen = () => { wsUp = true; renderHeader(); };
-  ws.onmessage = (e) => handleFrame(e.data);
-  ws.onclose = () => {
-    wsUp = false; renderHeader();
-    if (store.token && wsWanted) setTimeout(connectWs, 4000);
+  if (ws && ws.readyState <= 1) return; // already connecting/open
+  clearTimeout(reconnectTimer);
+  // Handlers close over their own socket: a stale socket's late events must
+  // never touch (or reconnect over) its replacement.
+  const socket = new WebSocket(`${wsServer()}/v1/ws?token=${encodeURIComponent(store.token)}`);
+  ws = socket;
+  socket.onopen = () => {
+    if (ws !== socket) return;
+    wsUp = true; renderHeader();
   };
-  ws.onerror = () => ws.close();
+  socket.onmessage = (e) => { if (ws === socket) handleFrame(e.data); };
+  socket.onclose = () => {
+    if (ws !== socket) return;
+    ws = null; wsUp = false; renderHeader();
+    if (store.token && wsWanted) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(connectWs, 4000);
+    }
+  };
+  socket.onerror = () => { try { socket.close(); } catch {} };
 }
 
 // ---------------------------------------------------------------- push
@@ -363,6 +380,13 @@ async function initPush() {
   try {
     if (!pushListenersReady) {
       await addPluginListener("go-push", "pushToken", (e) => postPushToken(e.token));
+      // A tapped notification carries the sender's peer id — land in their thread.
+      await addPluginListener("go-push", "pushTap", (e) => {
+        if (e.fromPeerId) openChat(e.fromPeerId);
+      });
+      await addPluginListener("go-push", "pushError", (e) => {
+        toast("Notifications unavailable: " + (e.message || "registration failed"));
+      });
       pushListenersReady = true;
     }
     // Once permission is determined this never re-prompts — it just
@@ -424,7 +448,10 @@ function stopTimers() {
 async function startSession() {
   wsWanted = true;
   renderHeader();
-  show("roster");
+  // Coming from sign-in/onboarding, land on the roster; resuming from the
+  // background, stay wherever the user was (an open thread survives).
+  if ($("roster").hidden && $("chat").hidden) show("roster");
+  syncBadge();
   try {
     await registerSelf();
     await refreshRoster();
@@ -442,21 +469,29 @@ async function startSession() {
 function suspendSession() {
   wsWanted = false;
   stopTimers();
+  clearTimeout(reconnectTimer);
   try { ws?.close(); } catch {}
   ws = null; wsUp = false;
 }
 document.addEventListener("visibilitychange", () => {
   if (!store.token) return;
   if (document.hidden) suspendSession();
-  else if ($("signin").hidden) startSession(); // signed in → resume
+  else if ($("signin").hidden && $("welcome").hidden) startSession(); // signed in → resume
 });
 
 function signOut(message) {
+  // Stop the server waking this phone for a team we just left (best-effort;
+  // needs the token that's about to be dropped).
+  if (TAURI?.core?.invoke && store.token) {
+    api("/v1/push-token", {
+      method: "POST",
+      body: JSON.stringify({ peerId: store.peerId, platform: "", pushToken: "" }),
+    }).catch(() => {});
+  }
+  suspendSession();
   store.token = "";
-  wsWanted = false;
-  stopTimers();
-  try { ws?.close(); } catch {}
-  ws = null; wsUp = false;
+  unread.clear();
+  syncBadge();
   $("signin-error").textContent = message || "";
   $("in-server").value = store.server;
   show("signin");

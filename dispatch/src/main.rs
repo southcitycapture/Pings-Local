@@ -33,22 +33,25 @@ fn push_sender_from_env() -> Option<Arc<dyn PushSender>> {
         println!("pings-dispatch: push debug — logging would-push lines, not calling Apple");
         return Some(Arc::new(LoggingPushSender));
     }
-    let vars = [
-        "DISPATCH_APNS_KEY",
-        "DISPATCH_APNS_KEY_ID",
-        "DISPATCH_APNS_TEAM_ID",
-        "DISPATCH_APNS_TOPIC",
-    ];
-    let values: [Option<String>; 4] =
-        vars.map(|v| std::env::var(v).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()));
-    if values.iter().all(Option::is_none) {
-        return None;
+    fn env(name: &str) -> Option<String> {
+        std::env::var(name).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
     }
-    if values.iter().any(Option::is_none) {
-        eprintln!("pings-dispatch: set all of {}, or none", vars.join(", "));
-        std::process::exit(2);
-    }
-    let [key, key_id, team_id, topic] = values.map(Option::unwrap);
+    let (key, key_id, team_id, topic) = match (
+        env("DISPATCH_APNS_KEY"),
+        env("DISPATCH_APNS_KEY_ID"),
+        env("DISPATCH_APNS_TEAM_ID"),
+        env("DISPATCH_APNS_TOPIC"),
+    ) {
+        (None, None, None, None) => return None,
+        (Some(key), Some(key_id), Some(team_id), Some(topic)) => (key, key_id, team_id, topic),
+        _ => {
+            eprintln!(
+                "pings-dispatch: set all of DISPATCH_APNS_KEY, DISPATCH_APNS_KEY_ID, \
+                 DISPATCH_APNS_TEAM_ID, DISPATCH_APNS_TOPIC — or none"
+            );
+            std::process::exit(2);
+        }
+    };
     let sandbox = match std::env::var("DISPATCH_APNS_ENDPOINT").ok().as_deref() {
         Some("sandbox") => true,
         Some("production") | None => false,

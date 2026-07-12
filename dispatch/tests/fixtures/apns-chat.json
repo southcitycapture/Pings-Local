@@ -2,5 +2,6 @@
   "aps": {
     "alert": { "title": "Zach", "body": "New message" },
     "sound": "default"
-  }
+  },
+  "fromPeerId": "test-peer"
 }

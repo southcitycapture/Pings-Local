@@ -3,10 +3,11 @@
 //!
 //! Content-blind by the same rule as the relay: the only things that leave
 //! for Apple are the frame's `channel` (routing metadata the server already
-//! reads) and `payload.from` (the sender display name, which the sender chose
-//! to put in the envelope). Message bodies never reach the push service, and
-//! a push never fakes an ack — ✓✓ still means the recipient's device
-//! processed the message.
+//! reads) and the envelope's `from` / `fromPeerId` (sender identity the
+//! sender chose to put there — the name titles the alert, the peer id lets
+//! a notification tap open the right thread). Message bodies never reach
+//! the push service, and a push never fakes an ack — ✓✓ still means the
+//! recipient's device processed the message.
 //!
 //! The trait is always compiled (tests inject mocks); the APNs implementation
 //! sits behind the `push` feature so the embedded desktop host can build
@@ -22,9 +23,14 @@ pub enum PushKind {
 /// Everything the gateway is allowed to know about an undelivered frame.
 #[derive(Clone, Debug)]
 pub struct PushNote {
+    /// The recipient's registered platform ("apns" | "fcm") — senders skip
+    /// platforms they don't speak, so adding FCM never touches the relay.
+    pub platform: String,
     pub push_token: String,
     pub kind: PushKind,
     pub sender_name: String,
+    /// The sender's peer id, for tap-to-open-thread routing on the device.
+    pub sender_peer_id: String,
 }
 
 /// Fire-and-forget push delivery. Implementations spawn onto the ambient
@@ -35,7 +41,7 @@ pub trait PushSender: Send + Sync + 'static {
 
 /// The exact wire payload for a note. Pure, so the unit tests and the
 /// `simctl push` fixtures under `tests/fixtures/` can lock the same JSON.
-pub fn payload_json(kind: PushKind, sender_name: &str) -> serde_json::Value {
+pub fn payload_json(kind: PushKind, sender_name: &str, sender_peer_id: &str) -> serde_json::Value {
     match kind {
         // A ping is the product: someone is actively trying to get your
         // attention right now. Time-sensitive lets it break through Focus.
@@ -44,14 +50,16 @@ pub fn payload_json(kind: PushKind, sender_name: &str) -> serde_json::Value {
                 "alert": { "title": sender_name, "body": "is pinging you" },
                 "sound": "default",
                 "interruption-level": "time-sensitive",
-            }
+            },
+            "fromPeerId": sender_peer_id,
         }),
         // A chat is a normal message — no content, just who it's from.
         PushKind::Chat => serde_json::json!({
             "aps": {
                 "alert": { "title": sender_name, "body": "New message" },
                 "sound": "default",
-            }
+            },
+            "fromPeerId": sender_peer_id,
         }),
     }
 }
@@ -69,8 +77,8 @@ impl PushSender for LoggingPushSender {
         };
         let token8: String = note.push_token.chars().take(8).collect();
         println!(
-            "pings-dispatch: would-push {kind} → {token8}… from {}",
-            note.sender_name
+            "pings-dispatch: would-push {kind} ({}) → {token8}… from {}",
+            note.platform, note.sender_name
         );
     }
 }
@@ -147,17 +155,36 @@ mod apns {
 
     impl PushSender for ApnsPushSender {
         fn send(&self, note: PushNote) {
+            if note.platform != "apns" {
+                // An FCM registration reached an APNs-only deployment; say so
+                // instead of dropping it silently.
+                eprintln!(
+                    "pings-dispatch: no sender for platform {} — push skipped",
+                    note.platform
+                );
+                return;
+            }
             let client = self.client.clone();
             let topic = self.topic.clone();
             tokio::spawn(async move {
-                // Repeated pings from one sender collapse into a single
-                // banner instead of stacking.
+                // Repeated pings from the same sender collapse into one
+                // banner; different senders must never collapse (a second
+                // ping would hide the first). Collapse ids cap at 64 bytes,
+                // so hash the peer id rather than embedding it.
+                let collapse_value;
                 let collapse = match note.kind {
-                    PushKind::Ping => a2::CollapseId::new("pings-ping").ok(),
+                    PushKind::Ping => {
+                        let mut h: u64 = 5381;
+                        for b in note.sender_peer_id.bytes() {
+                            h = h.wrapping_mul(33) ^ u64::from(b);
+                        }
+                        collapse_value = format!("ping-{h:x}");
+                        a2::CollapseId::new(&collapse_value).ok()
+                    }
                     PushKind::Chat => None,
                 };
                 let payload = RawPayload {
-                    body: payload_json(note.kind, &note.sender_name),
+                    body: payload_json(note.kind, &note.sender_name, &note.sender_peer_id),
                     device_token: &note.push_token,
                     options: NotificationOptions {
                         apns_topic: Some(&topic),

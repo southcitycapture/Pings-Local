@@ -305,9 +305,11 @@ async fn enroll(
     Ok(Json(serde_json::json!({ "deviceToken": token })))
 }
 
-/// Attach a platform push token to the calling device. Device-token auth
-/// only — a push token routes alerts to a device's mailbox, and the
-/// enrollment secret shouldn't be able to redirect someone else's.
+/// Attach (or, with an empty token, clear) the calling device's push
+/// registration. Device-token auth only — a push token routes alerts to a
+/// device's mailbox, and the enrollment secret shouldn't be able to redirect
+/// someone else's. Clients re-POST on every session start, so an unchanged
+/// registration is a no-op (no state-file rewrite).
 async fn push_token(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -321,20 +323,31 @@ async fn push_token(
     }
     let platform = req.platform.trim();
     let token = req.push_token.trim();
-    if !matches!(platform, "apns" | "fcm") || token.is_empty() {
+    if !token.is_empty() && !matches!(platform, "apns" | "fcm") {
         return StatusCode::UNPROCESSABLE_ENTITY;
     }
-    {
+    let changed = {
         let Ok(mut devices) = state.devices.lock() else {
             return StatusCode::INTERNAL_SERVER_ERROR;
         };
         let Some(device) = devices.get_mut(&caller) else {
             return StatusCode::UNAUTHORIZED;
         };
-        device.push_platform = Some(platform.to_string());
-        device.push_token = Some(token.to_string());
+        if token.is_empty() {
+            // Sign-out: stop waking this phone.
+            device.push_platform.take().is_some() | device.push_token.take().is_some()
+        } else {
+            let new_platform = Some(platform.to_string());
+            let new_token = Some(token.to_string());
+            let changed = device.push_platform != new_platform || device.push_token != new_token;
+            device.push_platform = new_platform;
+            device.push_token = new_token;
+            changed
+        }
+    };
+    if changed {
+        state.save_devices();
     }
-    state.save_devices();
     StatusCode::NO_CONTENT
 }
 
@@ -503,6 +516,51 @@ async fn go_icon_512() -> ([(&'static str, &'static str); 1], &'static [u8]) {
 
 // ---------------------------------------------------------------- relay
 
+/// Try to wake an offline recipient's phone about an undelivered frame.
+/// Only ping and chat frames push — and an ack is delivery bookkeeping
+/// riding the chat channel, not something to wake a human for. (Peeking
+/// `kind`/`from`/`fromPeerId` is envelope metadata, same standing as the
+/// channel; message content stays unread.) Best-effort by design: a push
+/// never fakes an ack.
+fn push_undeliverable(state: &AppState, to: &str, channel: &str, payload: &serde_json::Value) {
+    let Some(push) = &state.push else { return };
+    let kind = match channel {
+        "ping" => PushKind::Ping,
+        "chat" => PushKind::Chat,
+        _ => return,
+    };
+    if kind == PushKind::Chat && payload.get("kind").and_then(|v| v.as_str()) == Some("ack") {
+        return;
+    }
+    let registration = state.devices.lock().ok().and_then(|devices| {
+        let device = devices.get(to.trim())?;
+        Some((device.push_platform.clone()?, device.push_token.clone()?))
+    });
+    let Some((platform, push_token)) = registration else { return };
+    let sender_name = payload
+        .get("from")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Pings")
+        .to_string();
+    let sender_peer_id = payload
+        .get("fromPeerId")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    push.send(PushNote { platform, push_token, kind, sender_name, sender_peer_id });
+}
+
+/// A frame already serialized for a recipient (`{channel, payload}`) died
+/// with its socket — parse just enough to route it to the push gateway.
+fn push_dropped_frame(state: &AppState, to: &str, forward: &str) {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(forward) else {
+        return;
+    };
+    let channel = value.get("channel").and_then(|v| v.as_str()).unwrap_or_default();
+    let payload = value.get("payload").cloned().unwrap_or(serde_json::Value::Null);
+    push_undeliverable(state, to, channel, &payload);
+}
+
 /// The relay socket. Device-token auth only — the team key is for enrollment
 /// and admin, not for impersonating a peer on the wire. The token arrives as
 /// a Bearer header (native clients) or a `?token=` query parameter (browser
@@ -526,6 +584,10 @@ async fn ws_upgrade(
 /// frame it sends to the recipient's queue. Content-blind by design.
 async fn relay_session(state: AppState, peer_id: String, socket: WebSocket) {
     let (tx, mut rx) = unbounded_channel::<String>();
+    // A weak handle for self-notices: skips the conns lock without keeping
+    // the channel alive — revocation still closes the session by dropping
+    // the map's sender.
+    let self_tx = tx.downgrade();
     if let Ok(mut conns) = state.conns.lock() {
         conns.insert(peer_id.clone(), tx);
     }
@@ -535,7 +597,10 @@ async fn relay_session(state: AppState, peer_id: String, socket: WebSocket) {
         tokio::select! {
             queued = rx.recv() => {
                 let Some(frame) = queued else { break }; // revoked or replaced
-                if sink.send(WsMessage::Text(frame.into())).await.is_err() {
+                if sink.send(WsMessage::Text(frame.clone().into())).await.is_err() {
+                    // The socket died mid-write: "delivered" into this queue
+                    // was a lie for this frame — wake the phone instead.
+                    push_dropped_frame(&state, &peer_id, &frame);
                     break;
                 }
             }
@@ -566,38 +631,11 @@ async fn relay_session(state: AppState, peer_id: String, socket: WebSocket) {
                                 "channel": "system",
                                 "payload": { "type": "undeliverable", "to": frame.to },
                             });
-                            if let Ok(conns) = state.conns.lock() {
-                                if let Some(self_tx) = conns.get(&peer_id) {
-                                    let _ = self_tx.send(notice.to_string());
-                                }
+                            if let Some(self_tx) = self_tx.upgrade() {
+                                let _ = self_tx.send(notice.to_string());
                             }
-                            // No live socket, but a push mailbox: wake the
-                            // recipient's phone. Only the channel and the
-                            // sender's chosen display name leave the server;
-                            // the notice above still went to the sender, and
-                            // no ack is faked.
-                            if let Some(push) = &state.push {
-                                let kind = match frame.channel.as_str() {
-                                    "ping" => Some(PushKind::Ping),
-                                    "chat" => Some(PushKind::Chat),
-                                    _ => None,
-                                };
-                                let token = state.devices.lock().ok().and_then(|devices| {
-                                    devices
-                                        .get(frame.to.trim())
-                                        .filter(|d| d.push_platform.as_deref() == Some("apns"))
-                                        .and_then(|d| d.push_token.clone())
-                                });
-                                if let (Some(kind), Some(push_token)) = (kind, token) {
-                                    let sender_name = frame
-                                        .payload
-                                        .get("from")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("Pings")
-                                        .to_string();
-                                    push.send(PushNote { push_token, kind, sender_name });
-                                }
-                            }
+                            // No live socket, but maybe a push mailbox.
+                            push_undeliverable(&state, &frame.to, &frame.channel, &frame.payload);
                         }
                     }
                     Some(Ok(WsMessage::Close(_))) | Some(Err(_)) | None => break,
@@ -605,6 +643,14 @@ async fn relay_session(state: AppState, peer_id: String, socket: WebSocket) {
                 }
             }
         }
+    }
+
+    // Frames still queued when the socket died would vanish silently — the
+    // "delivered" verdict their senders saw only meant "enqueued". A phone
+    // with a push mailbox still gets woken for them.
+    rx.close();
+    while let Ok(frame) = rx.try_recv() {
+        push_dropped_frame(&state, &peer_id, &frame);
     }
 
     // Only remove our own registration — a reconnect may already have
@@ -628,17 +674,17 @@ async fn cors(
 ) -> Response {
     use axum::response::IntoResponse;
     fn add_headers(headers: &mut HeaderMap) {
-        let pairs = [
-            ("access-control-allow-origin", "*"),
-            ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS"),
-            ("access-control-allow-headers", "authorization, content-type"),
-            ("access-control-max-age", "86400"),
-        ];
-        for (name, value) in pairs {
-            if let Ok(value) = value.parse() {
-                headers.insert(name, value);
-            }
-        }
+        use axum::http::{header, HeaderValue};
+        headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
+        headers.insert(
+            header::ACCESS_CONTROL_ALLOW_METHODS,
+            HeaderValue::from_static("GET, POST, DELETE, OPTIONS"),
+        );
+        headers.insert(
+            header::ACCESS_CONTROL_ALLOW_HEADERS,
+            HeaderValue::from_static("authorization, content-type"),
+        );
+        headers.insert(header::ACCESS_CONTROL_MAX_AGE, HeaderValue::from_static("86400"));
     }
     if req.method() == axum::http::Method::OPTIONS {
         let mut res = StatusCode::NO_CONTENT.into_response();
@@ -1124,10 +1170,24 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::NO_CONTENT);
+        {
+            let devices = state.devices.lock().unwrap();
+            let device = devices.get("phone").unwrap();
+            assert_eq!(device.push_platform.as_deref(), Some("apns"));
+            assert_eq!(device.push_token.as_deref(), Some("tok-1"));
+        }
+
+        // An empty token clears the registration (the sign-out path).
+        let clear = r#"{"peerId":"phone","platform":"","pushToken":""}"#;
+        let res = router(state.clone())
+            .oneshot(json_req("POST", "/v1/push-token", Some(&token), clear))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
         let devices = state.devices.lock().unwrap();
         let device = devices.get("phone").unwrap();
-        assert_eq!(device.push_platform.as_deref(), Some("apns"));
-        assert_eq!(device.push_token.as_deref(), Some("tok-1"));
+        assert_eq!(device.push_platform, None, "sign-out stops the pushes");
+        assert_eq!(device.push_token, None);
     }
 
     #[tokio::test]
@@ -1187,7 +1247,7 @@ mod tests {
             (PushKind::Chat, include_str!("../tests/fixtures/apns-chat.json")),
         ] {
             let expected: serde_json::Value = serde_json::from_str(fixture).unwrap();
-            assert_eq!(push::payload_json(kind, "Zach"), expected);
+            assert_eq!(push::payload_json(kind, "Zach", "test-peer"), expected);
         }
     }
 
@@ -1360,13 +1420,20 @@ mod tests {
         // Ping to the offline phone → time-sensitive push with sender name.
         send_and_bounce(
             &mut alpha,
-            r#"{"to":"phone","channel":"ping","payload":{"from":"Zach","message":"meeting"}}"#,
+            r#"{"to":"phone","channel":"ping","payload":{"from":"Zach","fromPeerId":"alpha","message":"meeting"}}"#,
         )
         .await;
         // Chat to the offline phone → normal push.
         send_and_bounce(
             &mut alpha,
             r#"{"to":"phone","channel":"chat","payload":{"from":"Zach","kind":"private","message":"hey"}}"#,
+        )
+        .await;
+        // An ack riding the chat channel is delivery bookkeeping — never a
+        // "New message" push (the send-then-pocket case).
+        send_and_bounce(
+            &mut alpha,
+            r#"{"to":"phone","channel":"chat","payload":{"from":"Zach","kind":"ack","id":"m1","message":""}}"#,
         )
         .await;
         // Offline peer with no push token → notice only, no push.
@@ -1383,10 +1450,12 @@ mod tests {
         .await;
 
         let notes = mock.0.lock().unwrap();
-        assert_eq!(notes.len(), 2, "only ping+chat to the push-registered peer");
+        assert_eq!(notes.len(), 2, "only ping+non-ack chat to the push-registered peer");
         assert_eq!(notes[0].kind, PushKind::Ping);
+        assert_eq!(notes[0].platform, "apns");
         assert_eq!(notes[0].push_token, "apns-tok-1");
         assert_eq!(notes[0].sender_name, "Zach");
+        assert_eq!(notes[0].sender_peer_id, "alpha");
         assert_eq!(notes[1].kind, PushKind::Chat);
         drop(notes);
 
