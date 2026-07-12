@@ -11,9 +11,70 @@
 //!                        need to — clients re-register within 30s)
 //!   DISPATCH_TLS_CERT /  optional — PEM cert + key; both set = HTTPS/WSS,
 //!   DISPATCH_TLS_KEY     neither = plain HTTP for tailnet deployments
+//!   DISPATCH_APNS_KEY /  optional — all four set = APNs push for
+//!   DISPATCH_APNS_KEY_ID /         undeliverable relay frames: path to the
+//!   DISPATCH_APNS_TEAM_ID /        .p8 auth key, its key id, the Apple team
+//!   DISPATCH_APNS_TOPIC            id, and the app bundle id. None = no push.
+//!   DISPATCH_APNS_ENDPOINT optional — "sandbox" (dev-signed builds) or
+//!                        "production" (TestFlight/App Store, the default)
+//!   DISPATCH_PUSH_DEBUG  optional — "log" prints would-push lines instead of
+//!                        calling Apple (end-to-end testing without a key)
 
+use pings_dispatch::push::{ApnsConfig, ApnsPushSender, LoggingPushSender, PushSender};
 use pings_dispatch::{router, AppState, DEFAULT_ADDR};
 use std::path::PathBuf;
+use std::sync::Arc;
+
+/// Read the APNs env quartet: all set → a live APNs sender, none set → no
+/// push, a partial set → configuration error (mirrors the TLS pairing rule).
+/// `DISPATCH_PUSH_DEBUG=log` overrides with the logging sender.
+fn push_sender_from_env() -> Option<Arc<dyn PushSender>> {
+    if std::env::var("DISPATCH_PUSH_DEBUG").ok().as_deref() == Some("log") {
+        println!("pings-dispatch: push debug — logging would-push lines, not calling Apple");
+        return Some(Arc::new(LoggingPushSender));
+    }
+    let vars = [
+        "DISPATCH_APNS_KEY",
+        "DISPATCH_APNS_KEY_ID",
+        "DISPATCH_APNS_TEAM_ID",
+        "DISPATCH_APNS_TOPIC",
+    ];
+    let values: [Option<String>; 4] =
+        vars.map(|v| std::env::var(v).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()));
+    if values.iter().all(Option::is_none) {
+        return None;
+    }
+    if values.iter().any(Option::is_none) {
+        eprintln!("pings-dispatch: set all of {}, or none", vars.join(", "));
+        std::process::exit(2);
+    }
+    let [key, key_id, team_id, topic] = values.map(Option::unwrap);
+    let sandbox = match std::env::var("DISPATCH_APNS_ENDPOINT").ok().as_deref() {
+        Some("sandbox") => true,
+        Some("production") | None => false,
+        Some(other) => {
+            eprintln!("pings-dispatch: DISPATCH_APNS_ENDPOINT must be sandbox or production, got {other}");
+            std::process::exit(2);
+        }
+    };
+    match ApnsPushSender::new(ApnsConfig {
+        key_path: PathBuf::from(key),
+        key_id,
+        team_id,
+        topic: topic.clone(),
+        sandbox,
+    }) {
+        Ok(sender) => {
+            let env = if sandbox { "sandbox" } else { "production" };
+            println!("pings-dispatch: APNs push enabled (topic {topic}, {env})");
+            Some(Arc::new(sender))
+        }
+        Err(err) => {
+            eprintln!("pings-dispatch: {err}");
+            std::process::exit(2);
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -27,7 +88,11 @@ async fn main() {
     let addr = std::env::var("DISPATCH_ADDR").unwrap_or_else(|_| DEFAULT_ADDR.to_string());
     let state_file = std::env::var("DISPATCH_STATE_FILE").ok().map(PathBuf::from);
 
-    let app = router(AppState::new(team_key, state_file));
+    let mut state = AppState::new(team_key, state_file);
+    if let Some(sender) = push_sender_from_env() {
+        state = state.with_push_sender(sender);
+    }
+    let app = router(state);
     let tls_cert = std::env::var("DISPATCH_TLS_CERT").ok();
     let tls_key = std::env::var("DISPATCH_TLS_KEY").ok();
 

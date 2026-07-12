@@ -1,0 +1,7 @@
+{
+  "aps": {
+    "alert": { "title": "Zach", "body": "is pinging you" },
+    "sound": "default",
+    "interruption-level": "time-sensitive"
+  }
+}

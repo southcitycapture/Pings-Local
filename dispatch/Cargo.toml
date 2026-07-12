@@ -4,7 +4,21 @@ version = "0.2.0"
 description = "Pings Dispatch — the team rendezvous + relay server"
 edition = "2021"
 
+# The CLI always ships with push capability; default-features = false is for
+# the embedded desktop host, which links only the library.
+[[bin]]
+name = "pings-dispatch"
+path = "src/main.rs"
+required-features = ["push"]
+
+[features]
+# `push` pulls in the APNs client; the embedded desktop host builds with
+# default-features = false and stays push-free.
+default = ["push"]
+push = ["dep:a2"]
+
 [dependencies]
+a2 = { version = "0.10", default-features = false, features = ["ring"], optional = true }
 axum = { version = "0.8", features = ["ws"] }
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 futures-util = "0.3"

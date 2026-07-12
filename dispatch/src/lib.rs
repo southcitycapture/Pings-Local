@@ -21,6 +21,9 @@
 //!   same server in-process behind an Options toggle, so any teammate can
 //!   *be* the server without installing anything.
 
+pub mod push;
+
+use crate::push::{PushKind, PushNote, PushSender};
 use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -72,6 +75,21 @@ struct Device {
     name: String,
     token_hash: String,
     enrolled_at: u64,
+    /// Push registration ("apns" | "fcm"), set by `/v1/push-token`. Optional
+    /// with skip-if-none so state files from before push support round-trip
+    /// byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    push_platform: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    push_token: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PushTokenRequest {
+    peer_id: String,
+    platform: String,
+    push_token: String,
 }
 
 #[derive(Deserialize)]
@@ -106,6 +124,9 @@ pub struct AppState {
     conns: Arc<Mutex<HashMap<String, UnboundedSender<String>>>>,
     state_file: Option<PathBuf>,
     started_at: u64,
+    /// Push gateway for frames the relay can't deliver. `None` (the default)
+    /// means exactly the pre-push behavior.
+    push: Option<Arc<dyn PushSender>>,
 }
 
 impl AppState {
@@ -119,9 +140,17 @@ impl AppState {
             conns: Arc::new(Mutex::new(HashMap::new())),
             state_file,
             started_at: now_millis(),
+            push: None,
         };
         state.load_devices();
         state
+    }
+
+    /// Attach a push gateway — undeliverable relay frames to peers with a
+    /// registered push token become platform pushes.
+    pub fn with_push_sender(mut self, sender: Arc<dyn PushSender>) -> Self {
+        self.push = Some(sender);
+        self
     }
 
     pub fn roster_count(&self) -> usize {
@@ -265,11 +294,48 @@ async fn enroll(
                 name: req.name.trim().to_string(),
                 token_hash: sha256_hex(&token),
                 enrolled_at: now_millis(),
+                // Re-enrolling resets push registration too — the app
+                // re-POSTs /v1/push-token at every session start.
+                push_platform: None,
+                push_token: None,
             },
         );
     }
     state.save_devices();
     Ok(Json(serde_json::json!({ "deviceToken": token })))
+}
+
+/// Attach a platform push token to the calling device. Device-token auth
+/// only — a push token routes alerts to a device's mailbox, and the
+/// enrollment secret shouldn't be able to redirect someone else's.
+async fn push_token(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<PushTokenRequest>,
+) -> StatusCode {
+    let Some(caller) = bearer(&headers).and_then(|t| state.device_for_token(t)) else {
+        return StatusCode::UNAUTHORIZED;
+    };
+    if req.peer_id.trim() != caller {
+        return StatusCode::FORBIDDEN;
+    }
+    let platform = req.platform.trim();
+    let token = req.push_token.trim();
+    if !matches!(platform, "apns" | "fcm") || token.is_empty() {
+        return StatusCode::UNPROCESSABLE_ENTITY;
+    }
+    {
+        let Ok(mut devices) = state.devices.lock() else {
+            return StatusCode::INTERNAL_SERVER_ERROR;
+        };
+        let Some(device) = devices.get_mut(&caller) else {
+            return StatusCode::UNAUTHORIZED;
+        };
+        device.push_platform = Some(platform.to_string());
+        device.push_token = Some(token.to_string());
+    }
+    state.save_devices();
+    StatusCode::NO_CONTENT
 }
 
 /// Admin: list enrolled devices (team key only). Token hashes stay private.
@@ -505,6 +571,33 @@ async fn relay_session(state: AppState, peer_id: String, socket: WebSocket) {
                                     let _ = self_tx.send(notice.to_string());
                                 }
                             }
+                            // No live socket, but a push mailbox: wake the
+                            // recipient's phone. Only the channel and the
+                            // sender's chosen display name leave the server;
+                            // the notice above still went to the sender, and
+                            // no ack is faked.
+                            if let Some(push) = &state.push {
+                                let kind = match frame.channel.as_str() {
+                                    "ping" => Some(PushKind::Ping),
+                                    "chat" => Some(PushKind::Chat),
+                                    _ => None,
+                                };
+                                let token = state.devices.lock().ok().and_then(|devices| {
+                                    devices
+                                        .get(frame.to.trim())
+                                        .filter(|d| d.push_platform.as_deref() == Some("apns"))
+                                        .and_then(|d| d.push_token.clone())
+                                });
+                                if let (Some(kind), Some(push_token)) = (kind, token) {
+                                    let sender_name = frame
+                                        .payload
+                                        .get("from")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("Pings")
+                                        .to_string();
+                                    push.send(PushNote { push_token, kind, sender_name });
+                                }
+                            }
                         }
                     }
                     Some(Ok(WsMessage::Close(_))) | Some(Err(_)) | None => break,
@@ -537,6 +630,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/health", get(health))
         .route("/v1/status", get(admin_status))
         .route("/v1/enroll", post(enroll))
+        .route("/v1/push-token", post(push_token))
         .route("/v1/devices", get(list_devices))
         .route("/v1/devices/{peer_id}", delete(revoke_device))
         .route("/v1/register", post(register))
@@ -929,6 +1023,119 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn push_token_requires_matching_device_token() {
+        let state = test_state();
+        let token = body_json(
+            router(state.clone())
+                .oneshot(json_req("POST", "/v1/enroll", Some("sesame"), r#"{"peerId":"phone"}"#))
+                .await
+                .unwrap(),
+        )
+        .await["deviceToken"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let body = r#"{"peerId":"phone","platform":"apns","pushToken":"tok-1"}"#;
+
+        // The team key must NOT set push tokens — a push token routes alerts
+        // to a device's mailbox, only that device may point it somewhere.
+        let res = router(state.clone())
+            .oneshot(json_req("POST", "/v1/push-token", Some("sesame"), body))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+        // A device can't set someone else's token either.
+        let other = r#"{"peerId":"laptop","platform":"apns","pushToken":"tok-1"}"#;
+        let res = router(state.clone())
+            .oneshot(json_req("POST", "/v1/push-token", Some(&token), other))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+        // Junk platform rejected.
+        let junk = r#"{"peerId":"phone","platform":"smoke-signal","pushToken":"tok-1"}"#;
+        let res = router(state.clone())
+            .oneshot(json_req("POST", "/v1/push-token", Some(&token), junk))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        // The device's own token works.
+        let res = router(state.clone())
+            .oneshot(json_req("POST", "/v1/push-token", Some(&token), body))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+        let devices = state.devices.lock().unwrap();
+        let device = devices.get("phone").unwrap();
+        assert_eq!(device.push_platform.as_deref(), Some("apns"));
+        assert_eq!(device.push_token.as_deref(), Some("tok-1"));
+    }
+
+    #[tokio::test]
+    async fn push_fields_persist_and_legacy_state_files_load() {
+        let dir = std::env::temp_dir().join(format!("dispatch-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("state.json");
+
+        // A state file from before push support — no push fields at all.
+        std::fs::write(
+            &path,
+            r#"[{"peerId":"old","name":"Old Phone","tokenHash":"abc","enrolledAt":1}]"#,
+        )
+        .unwrap();
+        let state = AppState::new("sesame".to_string(), Some(path.clone()));
+        assert_eq!(state.device_count(), 1, "legacy state file loads");
+
+        // Devices without push tokens serialize without the keys.
+        state.save_devices();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("pushToken"), "no push keys for tokenless devices");
+
+        // Enroll + set a push token → both fields round-trip the file.
+        let token = body_json(
+            router(state.clone())
+                .oneshot(json_req("POST", "/v1/enroll", Some("sesame"), r#"{"peerId":"new"}"#))
+                .await
+                .unwrap(),
+        )
+        .await["deviceToken"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let body = r#"{"peerId":"new","platform":"apns","pushToken":"tok-9"}"#;
+        let res = router(state.clone())
+            .oneshot(json_req("POST", "/v1/push-token", Some(&token), body))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+        let reloaded = AppState::new("sesame".to_string(), Some(path.clone()));
+        let devices = reloaded.devices.lock().unwrap();
+        let device = devices.get("new").unwrap();
+        assert_eq!(device.push_platform.as_deref(), Some("apns"));
+        assert_eq!(device.push_token.as_deref(), Some("tok-9"));
+        drop(devices);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(feature = "push")]
+    #[test]
+    fn apns_payloads_match_the_simctl_fixtures() {
+        // One source of truth: the unit test and `xcrun simctl push` (Phase 3
+        // of the Go! native plan) use the same fixture files.
+        for (kind, fixture) in [
+            (PushKind::Ping, include_str!("../tests/fixtures/apns-ping.json")),
+            (PushKind::Chat, include_str!("../tests/fixtures/apns-chat.json")),
+        ] {
+            let expected: serde_json::Value = serde_json::from_str(fixture).unwrap();
+            assert_eq!(push::payload_json(kind, "Zach"), expected);
+        }
+    }
+
+    #[tokio::test]
     async fn relay_routes_between_connected_clients() {
         // Full integration: real listener, two WS clients, one frame across.
         let state = test_state();
@@ -1019,5 +1226,153 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(notice.to_text().unwrap()).unwrap();
         assert_eq!(parsed["channel"], "system");
         assert_eq!(parsed["payload"]["type"], "undeliverable");
+    }
+
+    /// Records every note instead of pushing — the assertion surface for the
+    /// undeliverable→push hook.
+    struct MockPush(Mutex<Vec<PushNote>>);
+
+    impl PushSender for MockPush {
+        fn send(&self, note: PushNote) {
+            self.0.lock().unwrap().push(note);
+        }
+    }
+
+    #[tokio::test]
+    async fn undeliverable_frames_push_when_a_token_is_registered() {
+        let mock = Arc::new(MockPush(Mutex::new(Vec::new())));
+        let state = test_state().with_push_sender(mock.clone());
+
+        // alpha is online; phone and mute are offline. phone registered a
+        // push token, mute never did.
+        let mut tokens = HashMap::new();
+        for id in ["alpha", "phone", "mute"] {
+            let res = router(state.clone())
+                .oneshot(json_req(
+                    "POST",
+                    "/v1/enroll",
+                    Some("sesame"),
+                    &format!(r#"{{"peerId":"{id}"}}"#),
+                ))
+                .await
+                .unwrap();
+            let token = body_json(res).await["deviceToken"].as_str().unwrap().to_string();
+            tokens.insert(id, token);
+        }
+        let res = router(state.clone())
+            .oneshot(json_req(
+                "POST",
+                "/v1/push-token",
+                Some(&tokens["phone"]),
+                r#"{"peerId":"phone","platform":"apns","pushToken":"apns-tok-1"}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = router(state.clone());
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let (mut alpha, _) = tokio_tungstenite::connect_async(format!(
+            "ws://{addr}/v1/ws?token={}",
+            tokens["alpha"]
+        ))
+        .await
+        .unwrap();
+
+        // Helper: send a frame, then wait for the undeliverable notice so the
+        // server has definitely processed the frame before we assert.
+        type Ws = tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >;
+        async fn send_and_bounce(ws: &mut Ws, frame: &str) {
+            ws.send(tokio_tungstenite::tungstenite::Message::Text(frame.to_string().into()))
+                .await
+                .unwrap();
+            let notice = tokio::time::timeout(std::time::Duration::from_secs(5), ws.next())
+                .await
+                .expect("undeliverable notice within 5s")
+                .unwrap()
+                .unwrap();
+            let parsed: serde_json::Value = serde_json::from_str(notice.to_text().unwrap()).unwrap();
+            assert_eq!(parsed["payload"]["type"], "undeliverable");
+        }
+
+        // Ping to the offline phone → time-sensitive push with sender name.
+        send_and_bounce(
+            &mut alpha,
+            r#"{"to":"phone","channel":"ping","payload":{"from":"Zach","message":"meeting"}}"#,
+        )
+        .await;
+        // Chat to the offline phone → normal push.
+        send_and_bounce(
+            &mut alpha,
+            r#"{"to":"phone","channel":"chat","payload":{"from":"Zach","kind":"private","message":"hey"}}"#,
+        )
+        .await;
+        // Offline peer with no push token → notice only, no push.
+        send_and_bounce(
+            &mut alpha,
+            r#"{"to":"mute","channel":"ping","payload":{"from":"Zach"}}"#,
+        )
+        .await;
+        // System-ish channel to the phone → no push either.
+        send_and_bounce(
+            &mut alpha,
+            r#"{"to":"phone","channel":"presence","payload":{"from":"Zach"}}"#,
+        )
+        .await;
+
+        let notes = mock.0.lock().unwrap();
+        assert_eq!(notes.len(), 2, "only ping+chat to the push-registered peer");
+        assert_eq!(notes[0].kind, PushKind::Ping);
+        assert_eq!(notes[0].push_token, "apns-tok-1");
+        assert_eq!(notes[0].sender_name, "Zach");
+        assert_eq!(notes[1].kind, PushKind::Chat);
+        drop(notes);
+
+        // A frame the relay CAN deliver never pushes. beta connects live,
+        // registers a push token, then alpha messages it.
+        let res = router(state.clone())
+            .oneshot(json_req(
+                "POST",
+                "/v1/enroll",
+                Some("sesame"),
+                r#"{"peerId":"beta"}"#,
+            ))
+            .await
+            .unwrap();
+        let beta_token = body_json(res).await["deviceToken"].as_str().unwrap().to_string();
+        let res = router(state.clone())
+            .oneshot(json_req(
+                "POST",
+                "/v1/push-token",
+                Some(&beta_token),
+                r#"{"peerId":"beta","platform":"apns","pushToken":"apns-tok-2"}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+        let (mut beta, _) =
+            tokio_tungstenite::connect_async(format!("ws://{addr}/v1/ws?token={beta_token}"))
+                .await
+                .unwrap();
+        alpha
+            .send(tokio_tungstenite::tungstenite::Message::Text(
+                r#"{"to":"beta","channel":"ping","payload":{"from":"Zach"}}"#.into(),
+            ))
+            .await
+            .unwrap();
+        let received = tokio::time::timeout(std::time::Duration::from_secs(5), beta.next())
+            .await
+            .expect("beta received within 5s")
+            .unwrap()
+            .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(received.to_text().unwrap()).unwrap();
+        assert_eq!(parsed["channel"], "ping");
+        assert_eq!(mock.0.lock().unwrap().len(), 2, "delivered frames never push");
     }
 }
