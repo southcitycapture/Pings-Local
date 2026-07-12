@@ -39,6 +39,9 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
+# The embedded team server ("Host on this computer" in Options) — the same
+# library the headless pings-dispatch CLI is built from.
+pings-dispatch = { path = "../dispatch" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

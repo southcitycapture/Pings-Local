@@ -164,6 +164,14 @@
           <input id="dispatch-key" type="password" placeholder="Shared team key" autocomplete="off" />
         </label>
         <p id="dispatch-status" class="muted-note">No team server configured.</p>
+        <label class="checkbox-row">
+          <input id="host-dispatch" type="checkbox" /> Host the team server on this computer
+        </label>
+        <label class="field">
+          Host key (share with your team)
+          <input id="host-dispatch-key" type="text" readonly spellcheck="false" placeholder="Generated when hosting starts" />
+        </label>
+        <p id="host-dispatch-status" class="muted-note">Not hosting.</p>
       </section>
 
       <section class="card">

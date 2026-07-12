@@ -24,6 +24,9 @@ const fields = {
   dispatchUrl: document.getElementById("dispatch-url"),
   dispatchKey: document.getElementById("dispatch-key"),
   dispatchStatus: document.getElementById("dispatch-status"),
+  hostDispatch: document.getElementById("host-dispatch"),
+  hostDispatchKey: document.getElementById("host-dispatch-key"),
+  hostDispatchStatus: document.getElementById("host-dispatch-status"),
   profileName: document.getElementById("profile-name"),
   avatarInput: document.getElementById("profile-avatar-input"),
   avatarPreview: document.getElementById("profile-avatar-preview"),
@@ -54,6 +57,28 @@ function applyTheme(settings) {
 
 function renderStatus(payload) {
   statusEl.textContent = JSON.stringify(payload, null, 2);
+}
+
+async function renderHostStatus() {
+  if (!fields.hostDispatchStatus) return;
+  try {
+    const status = await invoke("get_dispatch_host_status");
+    if (!status?.enabled) {
+      fields.hostDispatchStatus.textContent = "Not hosting.";
+      return;
+    }
+    if (status.error) {
+      fields.hostDispatchStatus.textContent = `Couldn't start: ${status.error}`;
+      return;
+    }
+    if (!status.running) {
+      fields.hostDispatchStatus.textContent = "Starting…";
+      return;
+    }
+    fields.hostDispatchStatus.textContent = `Hosting on port 43217 · ${status.devices} enrolled device${status.devices === 1 ? "" : "s"} · ${status.roster} on the roster`;
+  } catch {
+    fields.hostDispatchStatus.textContent = "Status unavailable.";
+  }
 }
 
 function renderDispatchStatus(status) {
@@ -190,6 +215,8 @@ function applyToInputs(settings) {
   if (document.activeElement !== fields.dispatchKey) {
     fields.dispatchKey.value = settings.dispatchTeamKey || "";
   }
+  fields.hostDispatch.checked = Boolean(settings.hostDispatchEnabled);
+  fields.hostDispatchKey.value = settings.hostDispatchKey || "";
   ["effectOpacity", "borderThickness", "effectFeather", "effectDurationMs"].forEach(updateRangeLabel);
   applyTheme(settings);
 }
@@ -278,6 +305,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   fields.dispatchKey.addEventListener("change", () =>
     saveSetting("dispatchTeamKey", fields.dispatchKey.value.trim()),
   );
+  fields.hostDispatch.addEventListener("change", async () => {
+    await saveSetting("hostDispatchEnabled", fields.hostDispatch.checked);
+    renderHostStatus();
+  });
   fields.profileName.addEventListener("change", async () => {
     await saveProfile({ ...(profileCache || {}), displayName: fields.profileName.value.trim() });
   });
@@ -336,13 +367,18 @@ window.addEventListener("DOMContentLoaded", async () => {
     renderStatus({ settings: payload, profile: profileCache });
   });
 
-  // Live team-server status (the publisher re-emits every few seconds).
+  // Live team-server + host status (the publisher's network-status event
+  // re-fires every few seconds, doubling as our polling tick).
   try {
     renderDispatchStatus(await invoke("get_network_status"));
   } catch {
     // Backend not ready yet; the event below will catch us up.
   }
-  await listen("network-status", (event) => renderDispatchStatus(event.payload));
+  renderHostStatus();
+  await listen("network-status", (event) => {
+    renderDispatchStatus(event.payload);
+    renderHostStatus();
+  });
 
   document.querySelector(".win-enter")?.classList.add("win-ready");
 });

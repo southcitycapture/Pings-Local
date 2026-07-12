@@ -7,7 +7,16 @@ two peers can't route to each other at all, envelopes are **relayed** through
 a WebSocket. Direct peer-to-peer stays the preferred path — the relay is the
 fallback, not the default.
 
-## Run it
+## Two ways to run it
+
+**Inside Pings (desktop):** Options → Network → **"Host the team server on
+this computer."** The app runs this same server in-process on port 43217,
+mints a host key to share with the team, and joins its own roster. Plain
+HTTP — meant for a LAN or tailnet.
+
+**Headless (CLI):** this crate builds the `pings-dispatch` binary for real
+deployments — a VPS, a container, a spare machine that's always on. This is
+the TLS-capable form:
 
 ```bash
 # Tailnet mode (plain HTTP; WireGuard carries transport security)

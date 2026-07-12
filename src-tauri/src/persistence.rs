@@ -22,6 +22,11 @@ pub struct Settings {
     /// Per-device token issued by Dispatch enrollment. Managed automatically —
     /// cleared when it stops working, re-issued via the team key.
     pub dispatch_device_token: String,
+    /// Host the team server (embedded Dispatch) on this machine.
+    pub host_dispatch_enabled: bool,
+    /// The hosted server's team key — generated on first enable, shared with
+    /// teammates so their clients can enroll.
+    pub host_dispatch_key: String,
     /// "Add by IP": peers reached by address where discovery can't see them
     /// (other subnets, tailnets). Fed into the peer table alongside mDNS.
     pub manual_peers: Vec<String>,
@@ -72,6 +77,8 @@ impl Default for Settings {
             discovery_node_ip: String::new(),
             dispatch_team_key: String::new(),
             dispatch_device_token: String::new(),
+            host_dispatch_enabled: false,
+            host_dispatch_key: String::new(),
             manual_peers: Vec::new(),
             prefer_overlay_interface: false,
             peer_sounds: HashMap::new(),
@@ -190,6 +197,16 @@ pub fn update_setting(app: &AppHandle, key: String, value: Value) -> Result<Sett
         "dispatchDeviceToken" => {
             if let Some(v) = value.as_str() {
                 settings.dispatch_device_token = v.trim().to_string();
+            }
+        }
+        "hostDispatchEnabled" => {
+            if let Some(v) = value.as_bool() {
+                settings.host_dispatch_enabled = v;
+            }
+        }
+        "hostDispatchKey" => {
+            if let Some(v) = value.as_str() {
+                settings.host_dispatch_key = v.trim().to_string();
             }
         }
         "manualPeers" => {
