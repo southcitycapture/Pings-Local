@@ -14,6 +14,13 @@ const CHAT_PORT: u16 = 43211;
 /// Default port of a Pings Dispatch (team) server.
 const DISPATCH_PORT: u16 = 43217;
 const PEER_STALE_MS: u64 = 900_000;
+/// How recently we must have heard a packet *directly* from a peer to keep
+/// sending direct UDP. Older than this (or never) and — if the relay is up —
+/// traffic to that peer routes through Dispatch instead. Three heartbeat
+/// cycles: one lost heartbeat shouldn't flip transports.
+const DIRECT_FRESH_MS: u64 = 90_000;
+/// Ring size for relay/UDP duplicate-message suppression.
+const SEEN_IDS_CAP: usize = 256;
 /// How often we heartbeat known peers to keep presence fresh. Must stay well
 /// under the frontend's 120s "online" window.
 const HEARTBEAT_SECS: u64 = 30;
@@ -138,10 +145,22 @@ pub struct NetworkRuntime {
     /// Prefer overlay interfaces (Tailscale/WireGuard) when picking the local
     /// address — see `interface_score`.
     pub prefer_overlay: bool,
-    /// Shared key presented to the Dispatch (team) server.
+    /// Shared key presented to the Dispatch (team) server (enrollment secret).
     pub dispatch_team_key: String,
+    /// Per-device token issued by Dispatch enrollment; empty until enrolled.
+    pub dispatch_device_token: String,
     /// Did the last Dispatch register/list round-trip succeed?
     pub dispatch_connected: bool,
+    /// Outbound queue of the live relay WebSocket, when connected.
+    pub relay_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+    /// ip -> last time a packet arrived *directly* from that address (UDP or
+    /// mDNS on the local link). Distinct from `last_seen`, which roster syncs
+    /// also refresh — this is the evidence that direct UDP actually works.
+    pub direct_rx: HashMap<String, u64>,
+    /// Recently processed private-message ids, so a message that arrives via
+    /// both UDP and relay lands once. Ring-bounded.
+    pub seen_chat_ids: HashSet<String>,
+    pub seen_chat_order: std::collections::VecDeque<String>,
     /// Every IPv4 assigned to this machine (plus loopback), cached so packet
     /// handlers can drop self-traffic with a set lookup instead of re-running
     /// interface enumeration per packet. Refreshed by the status publisher.
@@ -169,6 +188,70 @@ impl NetworkRuntime {
             .map(|i| normalize_ip(&i.address))
             .collect();
     }
+
+    /// Record direct evidence of a peer at `ip` (a packet actually arrived
+    /// from it, or mDNS resolved it on the local link).
+    fn note_direct_rx(&mut self, ip: &str) {
+        self.direct_rx.insert(normalize_ip(ip), now_millis());
+    }
+
+    /// Should traffic to this peer go through the relay instead of direct
+    /// UDP? Only when the relay is up, the peer has a stable identity to
+    /// address it by, and we've had no direct sign of life recently.
+    fn should_relay(&self, ip: &str, peer_id: &str) -> bool {
+        !peer_id.trim().is_empty()
+            && self.relay_tx.is_some()
+            && self
+                .direct_rx
+                .get(&normalize_ip(ip))
+                .map_or(true, |t| now_millis().saturating_sub(*t) > DIRECT_FRESH_MS)
+    }
+
+    /// Note a private-message id; returns `false` if it was already seen
+    /// (i.e. this is a duplicate delivery to drop).
+    fn note_chat_id(&mut self, id: &str) -> bool {
+        let id = id.trim();
+        if id.is_empty() {
+            return true; // no id, no dedup possible
+        }
+        if self.seen_chat_ids.contains(id) {
+            return false;
+        }
+        self.seen_chat_ids.insert(id.to_string());
+        self.seen_chat_order.push_back(id.to_string());
+        if self.seen_chat_order.len() > SEEN_IDS_CAP {
+            if let Some(oldest) = self.seen_chat_order.pop_front() {
+                self.seen_chat_ids.remove(&oldest);
+            }
+        }
+        true
+    }
+}
+
+/// Queue a frame onto the live relay socket: `{to, channel, payload}`, where
+/// the payload is exactly what UDP would have carried. Returns `false` when
+/// the relay isn't connected (caller falls back to UDP).
+fn send_relay_frame<T: Serialize>(
+    state: &NetworkingState,
+    to_peer_id: &str,
+    channel: &str,
+    payload: &T,
+) -> bool {
+    let guard = state.lock_runtime();
+    let Some(tx) = &guard.relay_tx else {
+        return false;
+    };
+    let frame = serde_json::json!({
+        "to": to_peer_id,
+        "channel": channel,
+        "payload": payload,
+    });
+    tx.send(frame.to_string()).is_ok()
+}
+
+pub fn set_dispatch_device_token(state: &NetworkingState, token: String) {
+    let mut guard = state.lock_runtime();
+    guard.dispatch_device_token = token.trim().to_string();
 }
 
 #[derive(Clone, Default, Serialize)]
@@ -618,11 +701,12 @@ pub fn start_dispatch_client(app: AppHandle, state: NetworkingState) {
         };
 
         loop {
-            let (base, key, me) = {
+            let (base, key, mut token, me) = {
                 let guard = state.lock_runtime();
                 (
                     normalize_dispatch_url(&guard.discovery_node_ip),
                     guard.dispatch_team_key.clone(),
+                    guard.dispatch_device_token.clone(),
                     serde_json::json!({
                         "peerId": guard.local_peer_id,
                         "name": guard.display_name,
@@ -634,17 +718,49 @@ pub fn start_dispatch_client(app: AppHandle, state: NetworkingState) {
             };
 
             if let Some(base) = base {
+                // Enrollment: trade the team key for this device's own token.
+                // The token is what the relay socket requires; the team key
+                // keeps working for register/list as the root fallback.
+                if token.is_empty() && !key.is_empty() {
+                    let enrolled = runtime.block_on(async {
+                        client
+                            .post(format!("{base}/v1/enroll"))
+                            .bearer_auth(&key)
+                            .json(&serde_json::json!({
+                                "peerId": me["peerId"],
+                                "name": me["name"],
+                            }))
+                            .send()
+                            .await?
+                            .error_for_status()?
+                            .json::<serde_json::Value>()
+                            .await
+                    });
+                    if let Ok(response) = enrolled {
+                        if let Some(new_token) = response["deviceToken"].as_str() {
+                            token = new_token.to_string();
+                            set_dispatch_device_token(&state, token.clone());
+                            let _ = crate::persistence::update_setting(
+                                &app,
+                                "dispatchDeviceToken".to_string(),
+                                serde_json::json!(token),
+                            );
+                        }
+                    }
+                }
+
+                let bearer = if token.is_empty() { key.clone() } else { token.clone() };
                 let result = runtime.block_on(async {
                     client
                         .post(format!("{base}/v1/register"))
-                        .bearer_auth(&key)
+                        .bearer_auth(&bearer)
                         .json(&me)
                         .send()
                         .await?
                         .error_for_status()?;
                     let listed = client
                         .get(format!("{base}/v1/peers"))
-                        .bearer_auth(&key)
+                        .bearer_auth(&bearer)
                         .send()
                         .await?
                         .error_for_status()?
@@ -688,6 +804,19 @@ pub fn start_dispatch_client(app: AppHandle, state: NetworkingState) {
                         }
                     }
                     Err(err) => {
+                        // A rejected device token self-heals: clear it and
+                        // re-enroll with the team key next tick (covers
+                        // revocation and server state loss).
+                        if err.status() == Some(reqwest::StatusCode::UNAUTHORIZED)
+                            && !token.is_empty()
+                        {
+                            set_dispatch_device_token(&state, String::new());
+                            let _ = crate::persistence::update_setting(
+                                &app,
+                                "dispatchDeviceToken".to_string(),
+                                serde_json::json!(""),
+                            );
+                        }
                         let was_connected = {
                             let mut guard = state.lock_runtime();
                             let was = guard.dispatch_connected;
@@ -706,6 +835,129 @@ pub fn start_dispatch_client(app: AppHandle, state: NetworkingState) {
             std::thread::sleep(Duration::from_secs(HEARTBEAT_SECS));
         }
     });
+}
+
+/// The relay client: one outbound WebSocket to Dispatch, authenticated by
+/// the device token. Outbound frames are queued through `relay_tx`; inbound
+/// frames are injected into the same handling paths as UDP datagrams, so a
+/// relayed ping flashes and a relayed message opens the DM window exactly
+/// like a local one. Reconnects on the heartbeat cadence.
+pub fn start_relay_client(app: AppHandle, state: NetworkingState) {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    use tokio_tungstenite::tungstenite::Message as WsMessage;
+
+    std::thread::spawn(move || {
+        let Ok(runtime) = tokio::runtime::Builder::new_current_thread().enable_all().build()
+        else {
+            return;
+        };
+        runtime.block_on(async move {
+            loop {
+                let (base, token) = {
+                    let guard = state.lock_runtime();
+                    (
+                        normalize_dispatch_url(&guard.discovery_node_ip),
+                        guard.dispatch_device_token.clone(),
+                    )
+                };
+                let Some(base) = base else {
+                    tokio::time::sleep(Duration::from_secs(HEARTBEAT_SECS)).await;
+                    continue;
+                };
+                if token.is_empty() {
+                    // Not enrolled yet — the dispatch client is working on it.
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    continue;
+                }
+
+                // http(s):// -> ws(s)://, same host and port.
+                let ws_url = format!("{}/v1/ws", base.replacen("http", "ws", 1));
+                let request = match ws_url.as_str().into_client_request() {
+                    Ok(mut req) => {
+                        match format!("Bearer {token}").parse() {
+                            Ok(value) => {
+                                req.headers_mut().insert("authorization", value);
+                                req
+                            }
+                            Err(_) => {
+                                tokio::time::sleep(Duration::from_secs(HEARTBEAT_SECS)).await;
+                                continue;
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        tokio::time::sleep(Duration::from_secs(HEARTBEAT_SECS)).await;
+                        continue;
+                    }
+                };
+
+                match tokio_tungstenite::connect_async(request).await {
+                    Ok((stream, _)) => {
+                        let (tx, mut outbound) =
+                            tokio::sync::mpsc::unbounded_channel::<String>();
+                        {
+                            state.lock_runtime().relay_tx = Some(tx);
+                        }
+                        let (mut sink, mut reader) = stream.split();
+                        loop {
+                            tokio::select! {
+                                queued = outbound.recv() => {
+                                    let Some(frame) = queued else { break };
+                                    if sink.send(WsMessage::Text(frame.into())).await.is_err() {
+                                        break;
+                                    }
+                                }
+                                incoming = reader.next() => {
+                                    match incoming {
+                                        Some(Ok(WsMessage::Text(text))) => {
+                                            handle_relay_frame(&app, &state, text.as_str());
+                                        }
+                                        Some(Ok(WsMessage::Close(_))) | Some(Err(_)) | None => break,
+                                        Some(Ok(_)) => {}
+                                    }
+                                }
+                            }
+                        }
+                        state.lock_runtime().relay_tx = None;
+                    }
+                    Err(err) => {
+                        let mut guard = state.lock_runtime();
+                        guard.diagnostics.last_connect_error = format!("relay:{err}");
+                    }
+                }
+
+                tokio::time::sleep(Duration::from_secs(HEARTBEAT_SECS)).await;
+            }
+        });
+    });
+}
+
+/// Inject a relayed frame into the normal delivery paths.
+fn handle_relay_frame(app: &AppHandle, state: &NetworkingState, text: &str) {
+    #[derive(Deserialize)]
+    struct InboundFrame {
+        channel: String,
+        payload: serde_json::Value,
+    }
+    let Ok(frame) = serde_json::from_str::<InboundFrame>(text) else {
+        return;
+    };
+    match frame.channel.as_str() {
+        "ping" => {
+            if let Ok(payload) = serde_json::from_value::<PingPayload>(frame.payload) {
+                deliver_incoming_ping(app, payload);
+            }
+        }
+        "chat" => {
+            if let Ok(payload) = serde_json::from_value::<ChatPayload>(frame.payload) {
+                process_chat_payload(app, state, payload, true);
+            }
+        }
+        // "system" (undeliverable notices) is informational only — delivery
+        // truth stays with the ack protocol.
+        _ => {}
+    }
 }
 
 pub fn emit_network_status(app: &AppHandle, state: &NetworkingState) {
@@ -936,6 +1188,9 @@ pub fn start_mdns_discovery(app: AppHandle, state: NetworkingState) {
                             .unwrap_or_default();
 
                         let changed = upsert_peer_locked(&mut guard, &ip, &peer_id, &kind, &name);
+                        // mDNS only resolves on the local link — that's direct
+                        // evidence, so this peer keeps direct UDP transport.
+                        guard.note_direct_rx(&ip);
                         guard.diagnostics.mdns_responses_received += 1;
                         guard.diagnostics.last_mdns_response_at = now_millis();
                         changed
@@ -976,6 +1231,10 @@ pub fn start_ping_listener(app: AppHandle, state: NetworkingState) {
             };
             let from_ip = normalize_ip(&from_addr.ip().to_string());
 
+            {
+                let mut guard = state.lock_runtime();
+                guard.note_direct_rx(&from_ip);
+            }
             if touch_peer(&state, &from_ip, &payload.from_peer_id, &payload.from) {
                 emit_peers_identity_change(&app, &state);
             }
@@ -1180,6 +1439,10 @@ pub fn start_chat_listener(app: AppHandle, state: NetworkingState) {
             }
 
             payload.from_ip = source_ip.clone();
+            {
+                let mut guard = state.lock_runtime();
+                guard.note_direct_rx(&source_ip);
+            }
             let identity_changed =
                 touch_peer(&state, &source_ip, &payload.from_peer_id, &payload.from);
             if identity_changed {
@@ -1192,6 +1455,9 @@ pub fn start_chat_listener(app: AppHandle, state: NetworkingState) {
             // fresh too — agents, which don't browse for peers, stay in the list
             // purely by acking the heartbeats we send them. The last_seen refresh
             // itself reaches the UI via the publisher's coalescing tick.
+            // Heartbeats are strictly a direct-UDP concern (relay peers stay
+            // fresh via the roster), so this branch stays out of the shared
+            // payload processing below.
             if payload.kind == "heartbeat" || payload.kind == "heartbeat-ack" {
                 if payload.kind == "heartbeat" {
                     send_heartbeat(&state, &source_ip, true);
@@ -1199,53 +1465,78 @@ pub fn start_chat_listener(app: AppHandle, state: NetworkingState) {
                 continue;
             }
 
-            // An ack confirms a private message we sent was delivered. Tell the
-            // frontend and stop — acks are not messages and are not recorded.
-            if payload.kind == "ack" {
-                let _ = app.emit(
-                    "chat-ack",
-                    serde_json::json!({
-                        "id": payload.id,
-                        "fromIp": source_ip,
-                        "fromPeerId": payload.from_peer_id,
-                    }),
-                );
-                continue;
-            }
-
-            if payload.kind == "private" {
-                let should_accept = {
-                    let guard = state.lock_runtime();
-                    payload.to_ip.trim().is_empty() || guard.is_local_ip(&payload.to_ip)
-                };
-                if !should_accept {
-                    continue;
-                }
-                let _ = overlay::open_direct_chat_window(
-                    &app,
-                    &payload.from_ip,
-                    Some(payload.from.clone()),
-                );
-                if let Ok(value) = serde_json::to_value(payload.clone()) {
-                    overlay::emit_private_chat_to_window(
-                        &app,
-                        &payload.from_ip,
-                        Some(payload.from.as_str()),
-                        value,
-                    );
-                }
-                record_incoming_chat(&app, "chat", &payload);
-                if !payload.id.trim().is_empty() {
-                    send_ack(&state, &source_ip, &payload.id);
-                }
-                let _ = app.emit("incoming-private-chat", payload);
-                continue;
-            }
-
-            record_incoming_chat(&app, "team-chat", &payload);
-            let _ = app.emit("incoming-team-chat", payload);
+            process_chat_payload(&app, &state, payload, false);
         }
     });
+}
+
+/// Handle a chat-port payload — the shared tail of the UDP listener and the
+/// relay client, so a message means the same thing however it arrived.
+/// `via_relay` steers where the ack goes back.
+fn process_chat_payload(
+    app: &AppHandle,
+    state: &NetworkingState,
+    payload: ChatPayload,
+    via_relay: bool,
+) {
+    // An ack confirms a private message we sent was delivered. Tell the
+    // frontend and stop — acks are not messages and are not recorded.
+    if payload.kind == "ack" {
+        let _ = app.emit(
+            "chat-ack",
+            serde_json::json!({
+                "id": payload.id,
+                "fromIp": payload.from_ip,
+                "fromPeerId": payload.from_peer_id,
+            }),
+        );
+        return;
+    }
+
+    if payload.kind == "private" {
+        // Relay frames were addressed to our peerId by the server; UDP
+        // packets still check the target address.
+        let should_accept = via_relay || {
+            let guard = state.lock_runtime();
+            payload.to_ip.trim().is_empty() || guard.is_local_ip(&payload.to_ip)
+        };
+        if !should_accept {
+            return;
+        }
+        // Drop duplicates (e.g. a message that made it both direct and via
+        // relay) — but still ack, the sender may have missed the first one.
+        let first_delivery = {
+            let mut guard = state.lock_runtime();
+            guard.note_chat_id(&payload.id)
+        };
+        if !payload.id.trim().is_empty() {
+            send_ack(
+                state,
+                &payload.from_ip,
+                &payload.from_peer_id,
+                &payload.id,
+                via_relay,
+            );
+        }
+        if !first_delivery {
+            return;
+        }
+        let _ = overlay::open_direct_chat_window(app, &payload.from_ip, Some(payload.from.clone()));
+        if let Ok(value) = serde_json::to_value(payload.clone()) {
+            overlay::emit_private_chat_to_window(
+                app,
+                &payload.from_ip,
+                Some(payload.from.as_str()),
+                value,
+            );
+        }
+        record_incoming_chat(app, "chat", &payload);
+        let _ = app.emit("incoming-private-chat", payload);
+        return;
+    }
+
+    record_incoming_chat(app, "team-chat", &payload);
+    let _ = app.emit("incoming-team-chat", payload);
 }
 
 pub fn send_ping(
@@ -1282,6 +1573,22 @@ pub fn send_ping(
         timestamp: now_millis(),
     };
 
+    // Prefer direct UDP; relay through Dispatch when there's no fresh direct
+    // evidence of this peer (e.g. it lives on another network).
+    let relay_to = {
+        let guard = state.lock_runtime();
+        let peer_id = guard
+            .peers
+            .get(&normalize_ip(&target_ip))
+            .map(|p| p.peer_id.clone())
+            .unwrap_or_default();
+        guard.should_relay(&target_ip, &peer_id).then_some(peer_id)
+    };
+    if let Some(peer_id) = relay_to {
+        if send_relay_frame(state, &peer_id, "ping", &payload) {
+            return Ok(payload);
+        }
+    }
     send_json(&payload, &target_ip, PING_PORT).map_err(|e| format!("ping-{e}"))?;
     Ok(payload)
 }
@@ -1346,14 +1653,36 @@ pub fn send_private_chat(
         timestamp: now_millis(),
     };
 
+    let relay_to = {
+        let guard = state.lock_runtime();
+        let peer_id = guard
+            .peers
+            .get(&normalize_ip(&target_ip))
+            .map(|p| p.peer_id.clone())
+            .unwrap_or_default();
+        guard.should_relay(&target_ip, &peer_id).then_some(peer_id)
+    };
+    if let Some(peer_id) = relay_to {
+        if send_relay_frame(state, &peer_id, "chat", &payload) {
+            return Ok(payload);
+        }
+    }
     send_json(&payload, &target_ip, CHAT_PORT).map_err(|e| format!("private-chat-{e}"))?;
     Ok(payload)
 }
 
 /// Send a delivery acknowledgement for a received private message back to its
 /// sender. Best-effort: a lost ack just leaves the sender showing "sent"
-/// instead of "delivered", never blocks anything.
-fn send_ack(state: &NetworkingState, target_ip: &str, message_id: &str) {
+/// instead of "delivered", never blocks anything. Acks answer on the channel
+/// the message arrived by — a relayed message's sender is probably not
+/// directly routable.
+fn send_ack(
+    state: &NetworkingState,
+    target_ip: &str,
+    target_peer_id: &str,
+    message_id: &str,
+    via_relay: bool,
+) {
     let (from_name, from_ip, from_peer_id) = {
         let guard = state.lock_runtime();
         (
@@ -1374,6 +1703,9 @@ fn send_ack(state: &NetworkingState, target_ip: &str, message_id: &str) {
         timestamp: now_millis(),
     };
 
+    if via_relay && send_relay_frame(state, target_peer_id, "chat", &payload) {
+        return;
+    }
     let _ = send_json(&payload, target_ip, CHAT_PORT);
 }
 
@@ -1437,6 +1769,41 @@ mod tests {
             interface_score("tailscale0", "100.101.102.103", true)
                 < interface_score("en0", "192.168.1.20", true)
         );
+    }
+
+    #[test]
+    fn relay_only_when_no_fresh_direct_evidence() {
+        let mut rt = NetworkRuntime::default();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+        // No relay connected -> never relay.
+        assert!(!rt.should_relay("100.64.0.9", "peer-a"));
+
+        rt.relay_tx = Some(tx);
+        // Relay up, never heard from peer directly -> relay.
+        assert!(rt.should_relay("100.64.0.9", "peer-a"));
+        // No stable identity to address -> can't relay.
+        assert!(!rt.should_relay("100.64.0.9", ""));
+        // Fresh direct packet -> back to direct UDP.
+        rt.note_direct_rx("100.64.0.9");
+        assert!(!rt.should_relay("100.64.0.9", "peer-a"));
+        // Stale direct evidence -> relay again.
+        rt.direct_rx
+            .insert("100.64.0.9".to_string(), now_millis() - DIRECT_FRESH_MS - 1);
+        assert!(rt.should_relay("100.64.0.9", "peer-a"));
+    }
+
+    #[test]
+    fn chat_id_dedup_is_ring_bounded() {
+        let mut rt = NetworkRuntime::default();
+        assert!(rt.note_chat_id("msg-1"), "first sighting is new");
+        assert!(!rt.note_chat_id("msg-1"), "second sighting is a duplicate");
+        assert!(rt.note_chat_id(""), "empty ids can't be deduped");
+        for i in 0..SEEN_IDS_CAP {
+            rt.note_chat_id(&format!("filler-{i}"));
+        }
+        assert!(rt.note_chat_id("msg-1"), "evicted from the ring, seen as new again");
+        assert!(rt.seen_chat_ids.len() <= SEEN_IDS_CAP);
     }
 
     #[test]

@@ -17,8 +17,11 @@ pub struct Settings {
     pub preferred_ip: String,
     /// Team server (Pings Dispatch) address — host, host:port, or full URL.
     pub discovery_node_ip: String,
-    /// Shared team key presented to the Dispatch server.
+    /// Shared team key presented to the Dispatch server (enrollment secret).
     pub dispatch_team_key: String,
+    /// Per-device token issued by Dispatch enrollment. Managed automatically —
+    /// cleared when it stops working, re-issued via the team key.
+    pub dispatch_device_token: String,
     /// "Add by IP": peers reached by address where discovery can't see them
     /// (other subnets, tailnets). Fed into the peer table alongside mDNS.
     pub manual_peers: Vec<String>,
@@ -68,6 +71,7 @@ impl Default for Settings {
             preferred_ip: String::new(),
             discovery_node_ip: String::new(),
             dispatch_team_key: String::new(),
+            dispatch_device_token: String::new(),
             manual_peers: Vec::new(),
             prefer_overlay_interface: false,
             peer_sounds: HashMap::new(),
@@ -181,6 +185,11 @@ pub fn update_setting(app: &AppHandle, key: String, value: Value) -> Result<Sett
         "dispatchTeamKey" => {
             if let Some(v) = value.as_str() {
                 settings.dispatch_team_key = v.trim().to_string();
+            }
+        }
+        "dispatchDeviceToken" => {
+            if let Some(v) = value.as_str() {
+                settings.dispatch_device_token = v.trim().to_string();
             }
         }
         "manualPeers" => {

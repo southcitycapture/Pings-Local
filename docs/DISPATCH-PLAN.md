@@ -85,6 +85,16 @@ Dispatch is sellable to Tailscale-using teams.**
 
 ## Phase D2 — relay + hardening (Dispatch on the open internet)
 
+> Status: **built** (tokens + TLS + relay; server verified live — TLS boot
+> with a real cert pair, enrollment/revocation over HTTPS, and a two-client
+> WebSocket relay integration test — client verified by unit tests +
+> compile; needs the cross-NAT two-machine pass). Deviations: clients keep
+> **UDP** for direct traffic (the plan's "everything over one WebSocket" was
+> unnecessary — the socket exists for relay only, and transport is chosen
+> per-send by direct-evidence freshness); team chat stays LAN/UDP for now
+> (roster-wide relay fanout deferred); the E2EE decision below is still
+> open, but the relay is already content-blind so it stays purely additive.
+
 - **Relay:** when a direct send fails (or the roster marks a peer
   unroutable), the client posts the envelope to Dispatch; Dispatch forwards
   it to the recipient over the recipient's persistent connection. Requires

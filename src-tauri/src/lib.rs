@@ -84,6 +84,14 @@ fn update_setting(
         }
         "dispatchTeamKey" => {
             networking::set_dispatch_team_key(&state, settings.dispatch_team_key.clone());
+            // A new team means a new enrollment — drop the old device token
+            // so the client re-enrolls under the new key.
+            networking::set_dispatch_device_token(&state, String::new());
+            let _ = persistence::update_setting(
+                &app,
+                "dispatchDeviceToken".to_string(),
+                serde_json::json!(""),
+            );
         }
         _ => {}
     }
@@ -265,6 +273,10 @@ pub fn run() {
                     &networking_state,
                     settings.dispatch_team_key,
                 );
+                networking::set_dispatch_device_token(
+                    &networking_state,
+                    settings.dispatch_device_token,
+                );
                 networking::set_manual_peers(
                     app.handle(),
                     &networking_state,
@@ -284,6 +296,7 @@ pub fn run() {
             networking::start_status_publisher(app.handle().clone(), networking_state.clone());
             networking::start_heartbeat_publisher(networking_state.clone());
             networking::start_dispatch_client(app.handle().clone(), networking_state.clone());
+            networking::start_relay_client(app.handle().clone(), networking_state.clone());
 
             // Menubar tray with per-peer quick-ping. It's kept in sync directly
             // from networking::emit_peers_snapshot as the peer list changes.
