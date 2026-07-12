@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pings Dispatch</title>
+<style>
+  /* Pings design tokens (mirrors src/core/tokens.css) */
+  :root {
+    --ground: #f5f7f6; --panel: #ffffff; --inset: #eef1f0;
+    --ink: #17211f; --ink-2: #5b6663; --ink-3: #8a9491;
+    --line: #e2e7e5; --accent: #14b8a6; --accent-ink: #0b6b61;
+    --good: #22a06b; --warn: #d97706; --bad: #dc2626;
+    --radius: 10px; --radius-control: 8px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0f1514; --panel: #161d1c; --inset: #1d2523;
+      --ink: #e8edec; --ink-2: #9fb0ac; --ink-3: #6d7a77;
+      --line: #253030; --accent: #2dd4bf; --accent-ink: #99f6e4;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font: 14px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif;
+    background: var(--ground); color: var(--ink);
+    max-width: 860px; margin: 0 auto; padding: 28px 20px 48px;
+  }
+  header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 20px; }
+  h1 { font-size: 18px; font-weight: 650; }
+  .ver { color: var(--ink-3); font-size: 12px; }
+  #signout { margin-left: auto; }
+  h2 { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); margin: 22px 0 8px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+  /* Stat tiles: sentence-case muted label over a semibold proportional value */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+  .tile .label { font-size: 12px; color: var(--ink-2); }
+  .tile .value { font-size: 26px; font-weight: 600; margin-top: 2px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-3); padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  tr:last-child td { border-bottom: 0; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; color: var(--ink-2); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); margin-right: 6px; vertical-align: 1px; }
+  .dot.online { background: var(--good); }
+  .state { color: var(--ink-2); font-size: 12px; }
+  .badge { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; color: var(--accent-ink); background: color-mix(in srgb, var(--accent) 18%, transparent); border-radius: 4px; padding: 1px 5px; margin-left: 6px; vertical-align: 1px; }
+  .empty { color: var(--ink-3); padding: 14px 10px; }
+  input[type="password"] {
+    width: 100%; height: 36px; border: 1px solid var(--line); background: var(--inset);
+    color: var(--ink); border-radius: var(--radius-control); padding: 0 10px; font: inherit;
+  }
+  input:focus { outline: none; border-color: var(--accent); }
+  button {
+    font: inherit; font-weight: 600; color: var(--accent-ink);
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    border: 0; border-radius: var(--radius-control); padding: 7px 14px; cursor: pointer;
+  }
+  button:hover { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+  button.danger { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
+  button.danger:hover { background: color-mix(in srgb, var(--bad) 20%, transparent); }
+  #gate { max-width: 380px; margin: 12vh auto 0; display: grid; gap: 10px; }
+  #gate p { color: var(--ink-2); font-size: 13px; }
+  #gate-error { color: var(--bad); font-size: 13px; min-height: 1.2em; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <section id="gate" hidden>
+    <h1>Pings Dispatch</h1>
+    <p>Enter the team key to open the admin dashboard.</p>
+    <input id="key-input" type="password" placeholder="Team key" autocomplete="off" />
+    <button id="key-go">Open dashboard</button>
+    <div id="gate-error"></div>
+  </section>
+
+  <main id="dash" hidden>
+    <header>
+      <h1>Pings Dispatch</h1>
+      <span class="ver" id="version"></span>
+      <button id="signout">Sign out</button>
+    </header>
+
+    <div class="tiles">
+      <div class="tile"><div class="label">Uptime</div><div class="value" id="t-uptime">—</div></div>
+      <div class="tile"><div class="label">On the roster</div><div class="value" id="t-roster">—</div></div>
+      <div class="tile"><div class="label">Enrolled devices</div><div class="value" id="t-devices">—</div></div>
+      <div class="tile"><div class="label">Relay connections</div><div class="value" id="t-relay">—</div></div>
+    </div>
+
+    <h2>Roster</h2>
+    <div class="card" style="padding: 4px 6px;">
+      <table>
+        <thead><tr><th>Name</th><th>Address</th><th>Presence</th><th>Last seen</th></tr></thead>
+        <tbody id="roster-body"></tbody>
+      </table>
+      <div class="empty" id="roster-empty" hidden>No one on the roster yet — clients appear within ~30s of pointing at this server.</div>
+    </div>
+
+    <h2>Enrolled devices</h2>
+    <div class="card" style="padding: 4px 6px;">
+      <table>
+        <thead><tr><th>Name</th><th>Peer ID</th><th>Enrolled</th><th></th></tr></thead>
+        <tbody id="devices-body"></tbody>
+      </table>
+      <div class="empty" id="devices-empty" hidden>No devices enrolled yet.</div>
+    </div>
+  </main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  let key = sessionStorage.getItem("dispatch-key") || "";
+  let timer = null;
+
+  const esc = (t) => { const d = document.createElement("div"); d.textContent = String(t ?? ""); return d.innerHTML; };
+
+  function ago(ts) {
+    if (!ts) return "never";
+    const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+    if (s < 10) return "just now";
+    if (s < 60) return s + "s ago";
+    const m = Math.floor(s / 60);
+    if (m < 60) return m + "m ago";
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + "h ago";
+    return Math.floor(h / 24) + "d ago";
+  }
+
+  function uptime(startedAt) {
+    if (!startedAt) return "—";
+    const s = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    if (s < 90) return s + "s";
+    const m = Math.floor(s / 60);
+    if (m < 90) return m + "m";
+    const h = Math.floor(m / 60);
+    if (h < 48) return h + "h " + (m % 60) + "m";
+    return Math.floor(h / 24) + "d " + (h % 24) + "h";
+  }
+
+  async function api(path, options = {}) {
+    const res = await fetch(path, {
+      ...options,
+      headers: { Authorization: "Bearer " + key, "Content-Type": "application/json", ...(options.headers || {}) },
+    });
+    if (res.status === 401) throw new Error("unauthorized");
+    if (!res.ok) throw new Error("http " + res.status);
+    return res.status === 204 ? null : res.json();
+  }
+
+  function showGate(message) {
+    clearInterval(timer);
+    $("dash").hidden = true;
+    $("gate").hidden = false;
+    $("gate-error").textContent = message || "";
+    $("key-input").focus();
+  }
+
+  async function refresh() {
+    const [status, peers, devices] = await Promise.all([
+      api("/v1/status"),
+      api("/v1/peers"),
+      api("/v1/devices"),
+    ]);
+
+    $("version").textContent = "v" + status.version;
+    $("t-uptime").textContent = uptime(status.startedAt);
+    $("t-roster").textContent = status.rosterCount;
+    $("t-devices").textContent = status.deviceCount;
+    $("t-relay").textContent = status.relayConnections;
+
+    const roster = peers.peers || [];
+    $("roster-empty").hidden = roster.length > 0;
+    $("roster-body").innerHTML = roster.map((p) => {
+      const online = Date.now() - (p.lastSeen || 0) <= 120000;
+      return `<tr>
+        <td>${esc(p.name || p.ip)}${p.kind === "agent" ? '<span class="badge">AI</span>' : ""}</td>
+        <td class="mono">${esc(p.ip)}:${esc(p.port || "")}</td>
+        <td><span class="dot${online ? " online" : ""}"></span><span class="state">${online ? "online" : "away"}</span></td>
+        <td class="num state">${esc(ago(p.lastSeen))}</td>
+      </tr>`;
+    }).join("");
+
+    const devs = devices.devices || [];
+    $("devices-empty").hidden = devs.length > 0;
+    $("devices-body").innerHTML = devs.map((d) => `<tr>
+        <td>${esc(d.name || "—")}</td>
+        <td class="mono">${esc(d.peerId)}</td>
+        <td class="num state">${esc(ago(d.enrolledAt))}</td>
+        <td style="text-align:right"><button class="danger" data-revoke="${esc(d.peerId)}">Revoke</button></td>
+      </tr>`).join("");
+  }
+
+  async function start() {
+    try {
+      await refresh();
+    } catch (err) {
+      showGate(String(err.message) === "unauthorized" ? "That key was not accepted." : "Can't reach the server: " + err.message);
+      return;
+    }
+    $("gate").hidden = true;
+    $("dash").hidden = false;
+    clearInterval(timer);
+    timer = setInterval(() => refresh().catch(() => showGate("Lost the server — sign in again.")), 5000);
+  }
+
+  $("key-go").addEventListener("click", () => {
+    key = $("key-input").value.trim();
+    if (!key) return;
+    sessionStorage.setItem("dispatch-key", key);
+    start();
+  });
+  $("key-input").addEventListener("keydown", (e) => { if (e.key === "Enter") $("key-go").click(); });
+  $("signout").addEventListener("click", () => {
+    key = "";
+    sessionStorage.removeItem("dispatch-key");
+    $("key-input").value = "";
+    showGate();
+  });
+  document.body.addEventListener("click", async (e) => {
+    const id = e.target?.dataset?.revoke;
+    if (!id) return;
+    if (!confirm("Revoke this device? Its token stops working and it drops off the roster.")) return;
+    try {
+      await api("/v1/devices/" + encodeURIComponent(id), { method: "DELETE" });
+      await refresh();
+    } catch { /* next auto-refresh will reconcile */ }
+  });
+
+  if (key) start(); else showGate();
+</script>
+</body>
+</html>

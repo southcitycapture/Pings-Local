@@ -145,6 +145,8 @@ Default port **43217**, JSON over HTTP(S). `Authorization: Bearer …` — the
 | `DELETE /v1/peers/{peerId}` | token | — | Remove a peer (clean shutdown). |
 | `GET /v1/ws` | device token | — | Upgrade to the relay WebSocket (below). |
 | `GET /v1/health` | — | — | `{app, version}` — unauthenticated liveness. |
+| `GET /v1/status` | team key | — | Server vitals: version, startedAt, roster/device/relay counts. |
+| `GET /admin` | — | — | Admin dashboard (self-contained page; key entered in-browser). |
 
 ### Relay
 

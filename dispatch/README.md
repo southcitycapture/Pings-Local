@@ -51,6 +51,15 @@ first contact.
 issues a valid pair with zero setup; on the public internet use Let's Encrypt
 (certbot/caddy) or terminate TLS at a reverse proxy.
 
+## Admin dashboard
+
+Open **`http://<server>:43217/admin`** in a browser (the bare `/` redirects
+there) and sign in with the team key. One self-contained page baked into the
+binary — no build step, no CDNs — showing uptime, roster/device/relay counts,
+the live roster with presence, and enrolled devices with **one-click revoke**.
+Auto-refreshes every 5 seconds; works against both the CLI and the host mode
+embedded in the Pings desktop app.
+
 ## Security model
 
 - The **team key** is the enrollment secret and admin credential. Treat it
@@ -72,6 +81,8 @@ accept a device token (team key also works as root). `Authorization: Bearer …`
 
 | Method & path | Auth | Body | Effect |
 |---|---|---|---|
+| `GET /admin` | — (key entered in-page) | — | The admin dashboard. |
+| `GET /v1/status` | team key | — | Server vitals: version, startedAt, roster/device/relay counts. |
 | `POST /v1/enroll` | team key | `{peerId, name}` | Issue (or rotate) this device's token → `{deviceToken}`. |
 | `GET /v1/devices` | team key | — | Enrolled devices (no hashes). |
 | `DELETE /v1/devices/{peerId}` | team key | — | Revoke: token + roster + live socket. |

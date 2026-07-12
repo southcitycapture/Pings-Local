@@ -124,6 +124,15 @@ actually cut off.
 
 ## Phase D3 — enterprise Dispatch
 
+> Status: **admin surface built** — `GET /admin` serves a self-contained
+> dashboard baked into the binary (team-key sign-in, stat tiles, live roster
+> with presence, device list with one-click revoke, 5s auto-refresh), backed
+> by a new team-key-only `GET /v1/status` vitals endpoint. Verified live:
+> real server + headless browser, including a revoke round-trip through the
+> UI. The remaining D3 items (SSO, audit/retention, key rotation, settings
+> push, multi-tenant) stay deferred until real customer input — building
+> them speculatively would guess at requirements we can just wait to hear.
+
 Only what real customers ask for, in the order they ask:
 
 - **Admin surface** (web page served by Dispatch): roster, device management,
