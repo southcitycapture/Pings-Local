@@ -1,3 +1,4 @@
+mod dispatch_host;
 mod networking;
 mod overlay;
 mod palette;
@@ -66,7 +67,7 @@ fn update_setting(
     key: String,
     value: serde_json::Value,
 ) -> Result<persistence::Settings, String> {
-    let settings = persistence::update_setting(&app, key.clone(), value)?;
+    let mut settings = persistence::update_setting(&app, key.clone(), value)?;
     // Network preferences must reach the live networking state, not just disk.
     match key.as_str() {
         "manualPeers" => {
@@ -93,10 +94,56 @@ fn update_setting(
                 serde_json::json!(""),
             );
         }
+        "hostDispatchEnabled" => {
+            if settings.host_dispatch_enabled {
+                // First enable: mint the team key the host will hand out.
+                if settings.host_dispatch_key.trim().is_empty() {
+                    let minted = uuid::Uuid::new_v4().simple().to_string();
+                    settings = persistence::update_setting(
+                        &app,
+                        "hostDispatchKey".to_string(),
+                        serde_json::json!(minted),
+                    )?;
+                }
+                // Join our own roster unless already pointed at some server —
+                // a host that can't see its own team is a support ticket.
+                if settings.discovery_node_ip.trim().is_empty() {
+                    settings = persistence::update_setting(
+                        &app,
+                        "discoveryNodeIp".to_string(),
+                        serde_json::json!("127.0.0.1:43217"),
+                    )?;
+                    let _ = networking::set_discovery_node_ip(
+                        &state,
+                        settings.discovery_node_ip.clone(),
+                    );
+                }
+                if settings.dispatch_team_key.trim().is_empty() {
+                    settings = persistence::update_setting(
+                        &app,
+                        "dispatchTeamKey".to_string(),
+                        serde_json::json!(settings.host_dispatch_key.clone()),
+                    )?;
+                    networking::set_dispatch_team_key(
+                        &state,
+                        settings.dispatch_team_key.clone(),
+                    );
+                }
+            }
+            dispatch_host::apply(&app, &settings);
+        }
         _ => {}
     }
     let _ = app.emit("settings-updated", settings.clone());
     Ok(settings)
+}
+
+#[tauri::command]
+fn get_dispatch_host_status(app: AppHandle) -> dispatch_host::HostStatusPayload {
+    let enabled = persistence::load_settings(&app)
+        .map(|s| s.host_dispatch_enabled)
+        .unwrap_or(false);
+    dispatch_host::status(&app, enabled)
 }
 
 #[tauri::command]
@@ -247,6 +294,7 @@ pub fn run() {
 
     builder
         .manage(networking_state.clone())
+        .manage(dispatch_host::DispatchHostState::default())
         .setup(move |app| {
             overlay::ensure_overlay_window(app.handle());
 
@@ -260,6 +308,8 @@ pub fn run() {
                 overlay::paint_window_ground(&window, dark);
             }
             if let Ok(settings) = persistence::load_settings(app.handle()) {
+                // Resume hosting the team server if it was on when we quit.
+                dispatch_host::apply(app.handle(), &settings);
                 let _ = networking::set_prefer_overlay(
                     &networking_state,
                     settings.prefer_overlay_interface,
@@ -348,6 +398,7 @@ pub fn run() {
             open_options_window,
             open_direct_chat_window,
             get_direct_chat_context,
+            get_dispatch_host_status,
             hide_palette,
             hide_toast
         ])

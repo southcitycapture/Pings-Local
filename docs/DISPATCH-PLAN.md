@@ -94,6 +94,14 @@ Dispatch is sellable to Tailscale-using teams.**
 > per-send by direct-evidence freshness); team chat stays LAN/UDP for now
 > (roster-wide relay fanout deferred); the E2EE decision below is still
 > open, but the relay is already content-blind so it stays purely additive.
+>
+> **Post-D2 addition — host mode.** Dispatch ships in two forms off one
+> library: the headless CLI (TLS-capable, for VPS/container/tailnet-node
+> deployments) and an **embedded host inside the Pings desktop app**
+> (Options → Network → "Host the team server on this computer") — the app
+> spawns the same server in-process, mints and displays a shareable host
+> key, and auto-joins its own roster. Small teams get a server by flipping
+> a checkbox; the CLI remains the grown-up deployment.
 
 - **Relay:** when a direct send fails (or the roster marks a peer
   unroutable), the client posts the envelope to Dispatch; Dispatch forwards
