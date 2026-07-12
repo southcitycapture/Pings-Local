@@ -11,6 +11,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
 <meta name="theme-color" content="#14b8a6" />
 <title>Pings Go!</title>
+<style>
+  /* Critical first-paint: themed background before app.css arrives, so a
+     cold launch never flashes white (matches --ground in app.css). */
+  html, body { height: 100%; margin: 0; background: #f5f7f6; }
+  @media (prefers-color-scheme: dark) { html, body { background: #0f1514; } }
+  [hidden] { display: none !important; }
+</style>
 <link rel="stylesheet" href="app.css?v=013" />
 </head>
 <body>
