@@ -122,3 +122,55 @@ leaves the message at "sent".
 
 That's the whole contract. The reference implementation in
 [`agent-bridge/`](../agent-bridge) does exactly this in ~150 lines of Node.
+
+## Dispatch — team server HTTP API (v1)
+
+Where multicast can't reach (other subnets, tailnets), a
+[Pings Dispatch](../dispatch) server replaces mDNS as the discovery source,
+and — when two peers can't route to each other at all — relays envelopes
+between them. Direct peer-to-peer over the UDP ports above remains the
+preferred path.
+
+Default port **43217**, JSON over HTTP(S). `Authorization: Bearer …` — the
+**team key** for enrollment/admin, a **device token** for everything else
+(the key also works as root). `/v1/health` is open.
+
+| Method & path | Auth | Body | Effect |
+|---|---|---|---|
+| `POST /v1/enroll` | team key | `{peerId, name}` | Issue (or rotate) a per-device token → `{deviceToken}`. |
+| `GET /v1/devices` | team key | — | Enrolled devices. |
+| `DELETE /v1/devices/{peerId}` | team key | — | Revoke a device: token, roster entry, live relay socket. |
+| `POST /v1/register` | token | `{peerId, name, kind, ip, port}` | Idempotent upsert — **doubles as the heartbeat**; clients call it every 30s. Server stamps `lastSeen`. |
+| `GET /v1/peers` | token | — | `{peers: [{peerId, name, kind, ip, port, lastSeen}]}` — stale entries (15 min) pruned. |
+| `DELETE /v1/peers/{peerId}` | token | — | Remove a peer (clean shutdown). |
+| `GET /v1/ws` | device token | — | Upgrade to the relay WebSocket (below). |
+| `GET /v1/health` | — | — | `{app, version}` — unauthenticated liveness. |
+
+### Relay
+
+Clients hold one outbound WebSocket each and send frames of the shape:
+
+```json
+{ "to": "<recipient peerId>", "channel": "ping" | "chat", "payload": { … } }
+```
+
+`payload` is **exactly** the JSON envelope UDP would have carried (the ping
+and chat formats above) — the server is content-blind and routes on
+`{to, channel}` only. The recipient receives `{"channel", "payload"}` and
+processes it identically to a UDP datagram; **acks travel back the same
+way**, so delivery states stay honest. If the recipient has no live socket
+the sender gets `{"channel":"system","payload":{"type":"undeliverable"}}` —
+informational only; acks remain the delivery truth.
+
+Transport choice is per-send: clients use direct UDP while they have fresh
+direct evidence of a peer (a packet actually received from it within 90
+seconds; mDNS resolution counts) and fall back to the relay otherwise.
+
+An agent joins a Dispatch roster the same way a human client does: enroll,
+register with `kind=agent`, and speak the same envelopes — over UDP when
+routable, over the relay socket when not.
+
+Security posture: plain-HTTP mode is for WireGuard/Tailscale overlays only;
+set `DISPATCH_TLS_CERT`/`DISPATCH_TLS_KEY` for the open internet. The team
+key is the enrollment secret; each device holds a revocable token stored
+server-side as a SHA-256 hash.

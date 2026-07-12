@@ -21,6 +21,9 @@ const fields = {
   customMessage: document.getElementById("custom-message"),
   preferOverlay: document.getElementById("prefer-overlay"),
   manualPeers: document.getElementById("manual-peers"),
+  dispatchUrl: document.getElementById("dispatch-url"),
+  dispatchKey: document.getElementById("dispatch-key"),
+  dispatchStatus: document.getElementById("dispatch-status"),
   profileName: document.getElementById("profile-name"),
   avatarInput: document.getElementById("profile-avatar-input"),
   avatarPreview: document.getElementById("profile-avatar-preview"),
@@ -51,6 +54,19 @@ function applyTheme(settings) {
 
 function renderStatus(payload) {
   statusEl.textContent = JSON.stringify(payload, null, 2);
+}
+
+function renderDispatchStatus(status) {
+  if (!fields.dispatchStatus) return;
+  const url = String(status?.discoveryNodeIp || "").trim();
+  if (!url) {
+    fields.dispatchStatus.textContent = "No team server configured.";
+    return;
+  }
+  const d = status?.diagnostics || {};
+  fields.dispatchStatus.textContent = d.discoveryNodeConnected
+    ? `Connected · ${d.lastPeerListCount ?? 0} on the team roster`
+    : "Not connected — check the address and team key.";
 }
 
 function setUpdateStatus(text, tone = "muted") {
@@ -164,9 +180,15 @@ function applyToInputs(settings) {
   fields.chatReceiveSound.value = settings.chatReceiveSound || "bubble";
   fields.customMessage.value = settings.customMessage || "";
   fields.preferOverlay.checked = Boolean(settings.preferOverlayInterface);
-  // Don't clobber the textarea mid-edit: only sync it when unfocused.
+  // Don't clobber text fields mid-edit: only sync them when unfocused.
   if (document.activeElement !== fields.manualPeers) {
     fields.manualPeers.value = (settings.manualPeers || []).join("\n");
+  }
+  if (document.activeElement !== fields.dispatchUrl) {
+    fields.dispatchUrl.value = settings.discoveryNodeIp || "";
+  }
+  if (document.activeElement !== fields.dispatchKey) {
+    fields.dispatchKey.value = settings.dispatchTeamKey || "";
   }
   ["effectOpacity", "borderThickness", "effectFeather", "effectDurationMs"].forEach(updateRangeLabel);
   applyTheme(settings);
@@ -250,6 +272,12 @@ window.addEventListener("DOMContentLoaded", async () => {
         .filter(Boolean),
     ),
   );
+  fields.dispatchUrl.addEventListener("change", () =>
+    saveSetting("discoveryNodeIp", fields.dispatchUrl.value.trim()),
+  );
+  fields.dispatchKey.addEventListener("change", () =>
+    saveSetting("dispatchTeamKey", fields.dispatchKey.value.trim()),
+  );
   fields.profileName.addEventListener("change", async () => {
     await saveProfile({ ...(profileCache || {}), displayName: fields.profileName.value.trim() });
   });
@@ -307,6 +335,14 @@ window.addEventListener("DOMContentLoaded", async () => {
     applyToInputs(payload);
     renderStatus({ settings: payload, profile: profileCache });
   });
+
+  // Live team-server status (the publisher re-emits every few seconds).
+  try {
+    renderDispatchStatus(await invoke("get_network_status"));
+  } catch {
+    // Backend not ready yet; the event below will catch us up.
+  }
+  await listen("network-status", (event) => renderDispatchStatus(event.payload));
 
   document.querySelector(".win-enter")?.classList.add("win-ready");
 });

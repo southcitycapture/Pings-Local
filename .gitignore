@@ -30,3 +30,6 @@ out/
 resources/
 opencode-cloud/
 test/
+
+# Dispatch server build artifacts
+dispatch/target/

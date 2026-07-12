@@ -1,0 +1,20 @@
+[package]
+name = "pings-dispatch"
+version = "0.2.0"
+description = "Pings Dispatch — the team rendezvous + relay server"
+edition = "2021"
+
+[dependencies]
+axum = { version = "0.8", features = ["ws"] }
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "signal", "sync", "time"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+http-body-util = "0.1"
+tokio-tungstenite = "0.28"
+tower = { version = "0.5", features = ["util"] }

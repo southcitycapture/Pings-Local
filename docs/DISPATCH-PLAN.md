@@ -49,6 +49,15 @@ technical users.
 
 ## Phase D1 — Dispatch directory (first paid artifact)
 
+> Status: **built** (server + client + Options UI; server verified live with
+> curl, client verified by unit tests + compile — needs the two-machine
+> tailnet pass). Implementation notes vs. the plan below: `dispatch/` is a
+> **standalone crate**, not a workspace member — the `pings-core` extraction
+> waits until Go! actually needs shared types, and the wire contract is the
+> JSON in PROTOCOL.md either way. `heartbeat` was merged into `register`
+> (an idempotent upsert *is* a heartbeat; one endpoint fewer). Roster
+> updates are plain polling at the heartbeat cadence, as planned.
+
 The rendezvous server, smallest sellable form:
 
 - **Server:** new `dispatch/` crate in this repo (own binary + Dockerfile).
@@ -75,6 +84,16 @@ other via Dispatch, pings/chat direct, roster survives server restart
 Dispatch is sellable to Tailscale-using teams.**
 
 ## Phase D2 — relay + hardening (Dispatch on the open internet)
+
+> Status: **built** (tokens + TLS + relay; server verified live — TLS boot
+> with a real cert pair, enrollment/revocation over HTTPS, and a two-client
+> WebSocket relay integration test — client verified by unit tests +
+> compile; needs the cross-NAT two-machine pass). Deviations: clients keep
+> **UDP** for direct traffic (the plan's "everything over one WebSocket" was
+> unnecessary — the socket exists for relay only, and transport is chosen
+> per-send by direct-evidence freshness); team chat stays LAN/UDP for now
+> (roster-wide relay fanout deferred); the E2EE decision below is still
+> open, but the relay is already content-blind so it stays purely additive.
 
 - **Relay:** when a direct send fails (or the roster marks a peer
   unroutable), the client posts the envelope to Dispatch; Dispatch forwards
