@@ -409,17 +409,26 @@ async fn admin_page() -> axum::response::Html<&'static str> {
     axum::response::Html(include_str!("admin.html"))
 }
 
+// Pings Go! (the mobile companion served at /go) lands next — its routes
+// plug in here alongside /admin.
+
 // ---------------------------------------------------------------- relay
 
 /// The relay socket. Device-token auth only — the team key is for enrollment
-/// and admin, not for impersonating a peer on the wire.
+/// and admin, not for impersonating a peer on the wire. The token arrives as
+/// a Bearer header (native clients) or a `?token=` query parameter (browser
+/// WebSocket API can't set headers — used by Pings Go!).
 async fn ws_upgrade(
     State(state): State<AppState>,
     headers: HeaderMap,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, StatusCode> {
-    let peer_id = bearer(&headers)
-        .and_then(|t| state.device_for_token(t))
+    let token = bearer(&headers)
+        .map(str::to_string)
+        .or_else(|| params.get("token").cloned());
+    let peer_id = token
+        .and_then(|t| state.device_for_token(&t))
         .ok_or(StatusCode::UNAUTHORIZED)?;
     Ok(upgrade.on_upgrade(move |socket| relay_session(state, peer_id, socket)))
 }
