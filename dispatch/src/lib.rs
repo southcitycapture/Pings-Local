@@ -618,6 +618,38 @@ async fn relay_session(state: AppState, peer_id: String, socket: WebSocket) {
 
 // ---------------------------------------------------------------- boot
 
+/// CORS for the native Go! shells: their webviews live on an app origin
+/// (`tauri://localhost`), not ours, so every /v1 fetch is cross-origin.
+/// Wildcard is safe here — auth is bearer tokens, never cookies, so there's
+/// nothing a foreign page could ride.
+async fn cors(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    use axum::response::IntoResponse;
+    fn add_headers(headers: &mut HeaderMap) {
+        let pairs = [
+            ("access-control-allow-origin", "*"),
+            ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS"),
+            ("access-control-allow-headers", "authorization, content-type"),
+            ("access-control-max-age", "86400"),
+        ];
+        for (name, value) in pairs {
+            if let Ok(value) = value.parse() {
+                headers.insert(name, value);
+            }
+        }
+    }
+    if req.method() == axum::http::Method::OPTIONS {
+        let mut res = StatusCode::NO_CONTENT.into_response();
+        add_headers(res.headers_mut());
+        return res;
+    }
+    let mut res = next.run(req).await;
+    add_headers(res.headers_mut());
+    res
+}
+
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(|| async { axum::response::Redirect::temporary("/go") }))
@@ -637,6 +669,7 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/peers", get(list_peers))
         .route("/v1/peers/{peer_id}", delete(deregister))
         .route("/v1/ws", get(ws_upgrade))
+        .layer(axum::middleware::from_fn(cors))
         .with_state(state)
 }
 
@@ -1020,6 +1053,29 @@ mod tests {
         assert_eq!(res.status(), StatusCode::OK);
         let peers = body_json(res).await["peers"].as_array().unwrap().len();
         assert_eq!(peers, 1);
+    }
+
+    #[tokio::test]
+    async fn cors_lets_the_native_shells_in() {
+        // Preflight (what WKWebView sends before a cross-origin POST with
+        // an Authorization header) answers 204 with the allow headers…
+        let res = router(test_state())
+            .oneshot(json_req("OPTIONS", "/v1/enroll", None, ""))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+        assert_eq!(res.headers()["access-control-allow-origin"], "*");
+        assert!(res.headers()["access-control-allow-headers"]
+            .to_str()
+            .unwrap()
+            .contains("authorization"));
+
+        // …and every normal response carries the allow-origin header.
+        let res = router(test_state())
+            .oneshot(Request::builder().uri("/v1/health").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(res.headers()["access-control-allow-origin"], "*");
     }
 
     #[tokio::test]
