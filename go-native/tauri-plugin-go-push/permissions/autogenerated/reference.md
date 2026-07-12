@@ -1,12 +1,13 @@
 ## Default Permission
 
-Push registration, token readback, and badge counts.
+Push registration, token readback, badge counts, and push events.
 
 #### This default permission set includes the following:
 
 - `allow-request-push`
 - `allow-get-token`
 - `allow-set-badge`
+- `allow-register-listener`
 
 ## Permission Table
 
@@ -39,6 +40,32 @@ Enables the get_token command without any pre-configured scope.
 <td>
 
 Denies the get_token command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`go-push:allow-register-listener`
+
+</td>
+<td>
+
+Enables the register_listener command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`go-push:deny-register-listener`
+
+</td>
+<td>
+
+Denies the register_listener command without any pre-configured scope.
 
 </td>
 </tr>

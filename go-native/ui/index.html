@@ -11,20 +11,59 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
 <meta name="theme-color" content="#14b8a6" />
 <title>Pings Go!</title>
-<link rel="stylesheet" href="app.css" />
+<link rel="stylesheet" href="app.css?v=012" />
 </head>
 <body>
+
+<section id="welcome" class="view" hidden>
+  <div class="signin-card">
+    <div class="logo-wrap"><img class="logo" src="icon.png" alt="" /></div>
+    <h1>Pings Go!</h1>
+    <p>The fastest way to get someone's attention.</p>
+    <div class="feature">
+      <span class="feature-icon flash-icon"></span>
+      <span class="feature-text"><b>Tap to ping.</b> Their screen lights up and chimes — no typing, no waiting.</span>
+    </div>
+    <div class="feature">
+      <span class="feature-icon chat-icon"></span>
+      <span class="feature-text"><b>Quick messages.</b> Short DMs with honest delivery ticks — ✓ sent, ✓✓ seen by their device.</span>
+    </div>
+    <div class="feature">
+      <span class="feature-icon bell-icon"></span>
+      <span class="feature-text"><b>Works when closed.</b> Pings arrive as time-sensitive notifications, even from your pocket.</span>
+    </div>
+    <button id="welcome-go" class="cta">Get started</button>
+  </div>
+</section>
 
 <section id="signin" class="view" hidden>
   <div class="signin-card">
     <img class="logo" src="icon.png" alt="" />
-    <h1>Pings Go!</h1>
-    <p>Join your team. Your phone becomes pingable.</p>
-    <input id="in-server" type="url" placeholder="Server (https://dispatch.example.com:43217)" autocomplete="url" autocapitalize="off" autocorrect="off" />
-    <input id="in-name" type="text" placeholder="Your name" autocomplete="name" />
-    <input id="in-key" type="password" placeholder="Team key" autocomplete="off" />
+    <h1>Join your team</h1>
+    <p>Two things from whoever runs your team's Pings server, plus your name.</p>
+    <label class="field-label" for="in-server">Server address</label>
+    <input id="in-server" type="url" placeholder="https://dispatch.example.com:43217" autocomplete="url" autocapitalize="off" autocorrect="off" />
+    <label class="field-label" for="in-key">Team key</label>
+    <input id="in-key" type="password" placeholder="The shared team secret" autocomplete="off" />
+    <label class="field-label" for="in-name">Your name</label>
+    <input id="in-name" type="text" placeholder="How teammates see you" autocomplete="name" />
     <button id="in-go" class="cta">Join the team</button>
     <div id="signin-error"></div>
+    <p class="fine-print">Your team runs its own server — the desktop app's
+    “Host on this computer”, or the <code>pings-dispatch</code> CLI. Nothing
+    goes through anyone else's cloud.</p>
+  </div>
+</section>
+
+<section id="notify" class="view" hidden>
+  <div class="signin-card">
+    <span class="feature-icon bell-icon big"></span>
+    <h1>One more thing</h1>
+    <p>Pings only matter if they reach you. Allow notifications so a ping
+    can light up your phone <b>even when the app is closed</b> — they're
+    marked time-sensitive, so the important ones break through Focus.</p>
+    <button id="notify-go" class="cta">Enable notifications</button>
+    <button id="notify-skip" class="ghost">Not now</button>
   </div>
 </section>
 
@@ -58,6 +97,6 @@
 <div id="flash" hidden><div class="edge"></div><div class="card"><div class="from"></div><div class="msg"></div></div></div>
 <div id="toast"></div>
 
-<script src="app.js"></script>
+<script src="app.js?v=012"></script>
 </body>
 </html>

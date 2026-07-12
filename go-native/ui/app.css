@@ -36,11 +36,60 @@ input:focus { outline: none; border-color: var(--accent); }
 
 /* ---- views are full-height flex columns ---- */
 .view { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--ground); }
+.view:not([hidden]) { animation: view-in 0.22s ease; }
+@keyframes view-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .view:not([hidden]) { animation: none; }
+}
 
-/* ---- sign in ---- */
-#signin { justify-content: center; padding: 24px; }
+/* ---- onboarding + sign in ---- */
+#signin, #welcome, #notify { justify-content: center; padding: 24px; }
 .signin-card { width: 100%; max-width: 360px; margin: 0 auto; display: grid; gap: 12px; }
+.feature {
+  display: flex; align-items: flex-start; gap: 12px; text-align: left;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 12px 14px;
+}
+.feature-icon { font-size: 22px; line-height: 1.2; flex: none; }
+.flash-icon::before { content: "📳"; }
+.chat-icon::before { content: "💬"; }
+.bell-icon::before { content: "🔔"; }
+.feature-icon.big { font-size: 44px; margin: 0 auto 4px; }
+.feature-text { font-size: 13.5px; color: var(--ink-2); }
+.feature-text b { color: var(--ink); }
+.field-label {
+  font-size: 12px; font-weight: 650; color: var(--ink-2);
+  margin: 2px 2px -6px; letter-spacing: 0.02em;
+}
+.ghost { height: 42px; border-radius: 10px; color: var(--ink-3); font-weight: 600; }
+.ghost:active { background: var(--inset); }
+.fine-print { font-size: 11.5px !important; color: var(--ink-3) !important; margin-top: 4px; }
+.fine-print code { font-family: ui-monospace, monospace; font-size: 11px; }
+#notify .signin-card { text-align: center; }
+#notify p { font-size: 14px; }
+#notify p b { color: var(--ink); }
 .logo { width: 72px; height: 72px; border-radius: 18px; margin: 0 auto 6px; display: block; }
+/* the welcome logo radiates like a ping */
+#welcome .logo { position: relative; }
+#welcome .logo-wrap { position: relative; width: 72px; margin: 0 auto 6px; }
+#welcome .logo-wrap .logo { margin: 0; }
+#welcome .logo-wrap::before, #welcome .logo-wrap::after {
+  content: ""; position: absolute; inset: 0; border-radius: 18px;
+  border: 2px solid var(--accent); opacity: 0;
+  animation: logo-ring 2.6s ease-out infinite;
+}
+#welcome .logo-wrap::after { animation-delay: 1.3s; }
+@keyframes logo-ring {
+  0% { opacity: 0.55; transform: scale(1); }
+  70% { opacity: 0; transform: scale(1.55); }
+  100% { opacity: 0; transform: scale(1.55); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #welcome .logo-wrap::before, #welcome .logo-wrap::after { animation: none; }
+}
 .signin-card h1 { text-align: center; font-size: 22px; font-weight: 700; }
 .signin-card p { text-align: center; color: var(--ink-2); font-size: 13px; margin-bottom: 6px; }
 .cta {

@@ -1,3 +1,8 @@
 [default]
-description = "Push registration, token readback, and badge counts."
-permissions = ["allow-request-push", "allow-get-token", "allow-set-badge"]
+description = "Push registration, token readback, badge counts, and push events."
+permissions = [
+  "allow-request-push",
+  "allow-get-token",
+  "allow-set-badge",
+  "allow-register-listener",
+]

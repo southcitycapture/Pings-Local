@@ -20,7 +20,7 @@ const esc = (t) => { const d = document.createElement("div"); d.textContent = St
 const TAURI = window.__TAURI__ || null;
 
 // ---------------------------------------------------------------- storage
-const STORE_KEYS = ["go-token", "go-peer-id", "go-name", "go-server"];
+const STORE_KEYS = ["go-token", "go-peer-id", "go-name", "go-server", "go-onboarded", "go-push-asked"];
 const storage = {
   cache: new Map(),
   backend: null, // tauri store, when running in the shell
@@ -179,7 +179,7 @@ function toast(text) {
 
 // ---------------------------------------------------------------- views
 function show(view) {
-  for (const id of ["signin", "roster", "chat"]) $(id).hidden = id !== view;
+  for (const id of ["welcome", "signin", "notify", "roster", "chat"]) $(id).hidden = id !== view;
 }
 
 // ---------------------------------------------------------------- roster
@@ -364,11 +364,26 @@ async function initPush() {
     if (!pushListenersReady) {
       await addPluginListener("go-push", "pushToken", (e) => postPushToken(e.token));
       pushListenersReady = true;
-      await invoke("plugin:go-push|request_push");
     }
+    // Once permission is determined this never re-prompts — it just
+    // re-registers, which iOS wants on every launch anyway.
+    await invoke("plugin:go-push|request_push");
     const current = await invoke("plugin:go-push|get_token");
     if (current?.token) postPushToken(current.token);
-  } catch { /* plugin absent (desktop) or permission denied — web behavior remains */ }
+  } catch {
+    // Plugin absent (desktop dev) or permission denied — the app keeps its
+    // web behavior; the token is retried at every session start.
+  }
+}
+
+// First join on a phone: explain WHY before the one-shot OS permission
+// prompt. Every later session start skips straight to registration.
+function maybeOfferPush() {
+  if (!TAURI?.core?.invoke) return;
+  const asked = storage.get("go-push-asked");
+  if (asked === "yes") initPush();
+  else if (!asked) show("notify");
+  // asked === "skip" → user said not now; stay quiet.
 }
 
 function syncBadge() {
@@ -418,7 +433,7 @@ async function startSession() {
   }
   connectWs();
   startTimers();
-  initPush();
+  maybeOfferPush();
 }
 
 // iOS freezes JS in the background but the server would keep the socket
@@ -471,6 +486,19 @@ async function join() {
 }
 
 // ---------------------------------------------------------------- wiring
+$("welcome-go").addEventListener("click", () => {
+  storage.set("go-onboarded", "yes");
+  show("signin");
+});
+$("notify-go").addEventListener("click", async () => {
+  storage.set("go-push-asked", "yes");
+  show("roster");
+  initPush();
+});
+$("notify-skip").addEventListener("click", () => {
+  storage.set("go-push-asked", "skip");
+  show("roster");
+});
 $("in-go").addEventListener("click", join);
 $("in-key").addEventListener("keydown", (e) => { if (e.key === "Enter") join(); });
 $("signout").addEventListener("click", () => signOut());
@@ -485,13 +513,29 @@ $("peer-list").addEventListener("click", (e) => {
 });
 
 // ---------------------------------------------------------------- boot
+// Never boot to a blank screen: any failure lands on sign-in with the error
+// visible instead of a white webview.
+window.addEventListener("error", (e) => {
+  const el = $("signin-error");
+  if (el && !el.textContent) { el.textContent = "Startup error: " + (e.message || e.type); show("signin"); }
+});
 (async () => {
-  await storage.init();
+  try {
+    await storage.init();
+  } catch (err) {
+    console.error("storage init failed, falling back to memory", err);
+    storage.backend = null;
+  }
   $("in-server").value = store.server;
   $("in-name").value = store.name;
   if (store.token && store.name && store.server) {
     startSession();
+  } else if (!storage.get("go-onboarded")) {
+    show("welcome");
   } else {
     show("signin");
   }
-})();
+})().catch((err) => {
+  $("signin-error").textContent = "Startup error: " + (err?.message || err);
+  show("signin");
+});

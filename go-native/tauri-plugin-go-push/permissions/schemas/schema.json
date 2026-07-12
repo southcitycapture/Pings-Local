@@ -307,6 +307,18 @@
           "markdownDescription": "Denies the get_token command without any pre-configured scope."
         },
         {
+          "description": "Enables the register_listener command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-register-listener",
+          "markdownDescription": "Enables the register_listener command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the register_listener command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-register-listener",
+          "markdownDescription": "Denies the register_listener command without any pre-configured scope."
+        },
+        {
           "description": "Enables the request_push command without any pre-configured scope.",
           "type": "string",
           "const": "allow-request-push",
@@ -331,10 +343,10 @@
           "markdownDescription": "Denies the set_badge command without any pre-configured scope."
         },
         {
-          "description": "Push registration, token readback, and badge counts.\n#### This default permission set includes:\n\n- `allow-request-push`\n- `allow-get-token`\n- `allow-set-badge`",
+          "description": "Push registration, token readback, badge counts, and push events.\n#### This default permission set includes:\n\n- `allow-request-push`\n- `allow-get-token`\n- `allow-set-badge`\n- `allow-register-listener`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Push registration, token readback, and badge counts.\n#### This default permission set includes:\n\n- `allow-request-push`\n- `allow-get-token`\n- `allow-set-badge`"
+          "markdownDescription": "Push registration, token readback, badge counts, and push events.\n#### This default permission set includes:\n\n- `allow-request-push`\n- `allow-get-token`\n- `allow-set-badge`\n- `allow-register-listener`"
         }
       ]
     }
