@@ -1,0 +1,14 @@
+{
+  "name": "Pings Go!",
+  "short_name": "Pings",
+  "description": "See who's around. Ping them from your phone.",
+  "start_url": "/go",
+  "scope": "/go",
+  "display": "standalone",
+  "background_color": "#0f1514",
+  "theme_color": "#14b8a6",
+  "icons": [
+    { "src": "/go/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/go/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

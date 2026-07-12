@@ -51,6 +51,20 @@ first contact.
 issues a valid pair with zero setup; on the public internet use Let's Encrypt
 (certbot/caddy) or terminate TLS at a reverse proxy.
 
+## Pings Go! — the phone client
+
+Open **`http://<server>:43217/go`** on a phone (the bare `/` redirects
+there), enter your name + the team key, and the phone joins the roster:
+live presence, tap-to-ping with the **full-screen flash** (plus sound and
+vibration), and DMs with real ✓✓ delivery acks — all riding the relay
+WebSocket, so it works from any network that can reach the server. It's a
+PWA: "Add to Home Screen" installs it like an app. No app store, no
+accounts, nothing to build.
+
+Being a web page, it receives only while open — background push
+notifications are the native app's job (see
+[docs/GO-NATIVE-HANDOFF.md](../docs/GO-NATIVE-HANDOFF.md)).
+
 ## Admin dashboard
 
 Open **`http://<server>:43217/admin`** in a browser (the bare `/` redirects

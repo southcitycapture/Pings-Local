@@ -144,6 +144,22 @@ Only what real customers ask for, in the order they ask:
 
 ## Phase G1 — Pings Go! companion (needs D2)
 
+> Status: **built, as the web companion** — Dispatch serves Pings Go! at
+> `/go`: sign-in (name + team key → auto-enroll), live roster, tap-to-ping
+> with the full-screen flash + sound + vibration, DM threads with ✓✓ acks,
+> installable as a PWA. Everything rides the relay socket (which now also
+> accepts `?token=` since browsers can't set WS headers); phones register
+> a `go-<id>` pseudo-address so desktops relay to them automatically.
+> Verified end-to-end: two headless mobile browsers against the real
+> server — join → roster → ping (flash on the receiving phone) → DM (✓✓).
+> **Deliberate deviation from the plan below:** the Tauri-native app and
+> push notifications require Xcode, an Apple Developer account, and
+> APNs/FCM credentials — none of which exist yet — so they move to a
+> Mac-side project with a full punch list in
+> [GO-NATIVE-HANDOFF.md](./GO-NATIVE-HANDOFF.md). The web version is what
+> "no accounts, no app store, works today" looks like; native adds
+> receiving-while-closed.
+
 Thin client, maximum leverage:
 
 - **Tauri 2 mobile targets** (iOS + Android) sharing the Rust core: envelope
